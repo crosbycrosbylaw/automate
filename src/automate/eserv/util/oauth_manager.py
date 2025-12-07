@@ -12,13 +12,12 @@ from rampy.util import create_field_factory
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
-    from typing import Literal
 
     from dropbox import Dropbox
 
     from automate.eserv.monitor.client import GraphClient
+    from automate.eserv.types.typechecking import CredentialsJSON, CredentialType
 
-type CredentialType = Literal['dropbox', 'microsoft-outlook']
 type RefreshHandler = Callable[[OAuthCredential], dict[str, Any]]
 
 
@@ -53,6 +52,7 @@ def _refresh_outlook_msal(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
 
     Raises:
         RuntimeError: If token refresh fails
+
     """
     import msal
 
@@ -249,12 +249,17 @@ class CredentialManager:
             data = orjson.loads(f.read())
 
         for item in data:
+            item: CredentialsJSON
             cred_type = item['type']
 
             # Parse expiration
-            expires_at = None
-            if 'expires_at' in item:
-                expires_at = datetime.fromisoformat(item['expires_at'])
+
+            if expires_str := item.get('expires_at'):
+                expires_at = datetime.fromisoformat(expires_str)
+            elif expires_int := item.get('expires_in'):
+                expires_at = datetime.now(UTC) + timedelta(seconds=expires_int)
+            else:
+                expires_at = None
 
             # Parse MSAL migration status (default False for backward compat)
             msal_migrated = item.get('msal_migrated', False)
@@ -272,7 +277,7 @@ class CredentialManager:
 
             self._credentials[cred_type] = OAuthCredential(
                 type=cred_type,
-                account=item['account'],
+                account=item.get('account', 'anonymous'),
                 client_id=item['client_id'],
                 client_secret=item['client_secret'],
                 token_type=item['token_type'],

@@ -8,7 +8,6 @@ __all__ = [
     'CredentialConfig',
     'CredentialManager',
     'CredentialManager',
-    'CredentialType',
     'DocumentDownloadError',
     'DocumentExtractionError',
     'DocumentUploadError',
@@ -55,6 +54,11 @@ from .results import *
 from .structs import *
 
 if TYPE_CHECKING:
-    __all__ += ['ErrorDict', 'ProcessStatus', 'ProcessedResultDict']
+    __all__ += [
+        'CredentialType',
+        'ErrorDict',
+        'ProcessStatus',
+        'ProcessedResultDict',
+    ]
 
     from .typechecking import *

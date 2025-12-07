@@ -107,8 +107,11 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstandard-0.25.0-py314hc5dbbe4_1.conda
       - conda: https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-hbeecb71_2.conda
       - pypi: https://files.pythonhosted.org/packages/e2/71/1033629deb8460a8f97f83e6ac4ca3b93952e2b6f826056684df8275e015/coverage-7.12.0-cp314-cp314-win_amd64.whl
+      - pypi: https://files.pythonhosted.org/packages/7e/bf/80fbf45253ea585a1e492a6a17efcb93467701fa79e71550a430c5e60df0/cryptography-46.0.3-cp311-abi3-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/c2/dc/18d48843499e278538890dc709e9ee3dea8375f8be8e82682851df1b48b5/msal-1.34.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/f9/e8/989f4eaa369c7166dc24f0eaa3023f13788c40ff1b96701f7047421554a8/pymupdf-1.26.6-cp310-abi3-win_amd64.whl
       - pypi: https://files.pythonhosted.org/packages/76/48/cadca48562c7f455a57025ddd7122886fedab618bf499106bb3d73797bcd/pymupdf_stubs-1.26.1.post1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/0b/8b/6300fb80f858cda1c51ffa17075df5d846757081d11ab4aa35cef9e6258b/pytest-9.0.1-py3-none-any.whl
@@ -287,6 +290,36 @@ packages:
   purls: []
   size: 49003
   timestamp: 1761175499490
+- pypi: https://files.pythonhosted.org/packages/7e/bf/80fbf45253ea585a1e492a6a17efcb93467701fa79e71550a430c5e60df0/cryptography-46.0.3-cp311-abi3-win_amd64.whl
+  name: cryptography
+  version: 46.0.3
+  sha256: a9a3008438615669153eb86b26b61e09993921ebdd75385ddd748702c5adfddb
+  requires_dist:
+  - cffi>=1.14 ; python_full_version == '3.8.*' and platform_python_implementation != 'PyPy'
+  - cffi>=2.0.0 ; python_full_version >= '3.9' and platform_python_implementation != 'PyPy'
+  - typing-extensions>=4.13.2 ; python_full_version < '3.11'
+  - bcrypt>=3.1.5 ; extra == 'ssh'
+  - nox[uv]>=2024.4.15 ; extra == 'nox'
+  - cryptography-vectors==46.0.3 ; extra == 'test'
+  - pytest>=7.4.0 ; extra == 'test'
+  - pytest-benchmark>=4.0 ; extra == 'test'
+  - pytest-cov>=2.10.1 ; extra == 'test'
+  - pytest-xdist>=3.5.0 ; extra == 'test'
+  - pretend>=0.7 ; extra == 'test'
+  - certifi>=2024 ; extra == 'test'
+  - pytest-randomly ; extra == 'test-randomorder'
+  - sphinx>=5.3.0 ; extra == 'docs'
+  - sphinx-rtd-theme>=3.0.0 ; extra == 'docs'
+  - sphinx-inline-tabs ; extra == 'docs'
+  - pyenchant>=3 ; extra == 'docstest'
+  - readme-renderer>=30.0 ; extra == 'docstest'
+  - sphinxcontrib-spelling>=7.3.1 ; extra == 'docstest'
+  - build>=1.0.0 ; extra == 'sdist'
+  - ruff>=0.11.11 ; extra == 'pep8test'
+  - mypy>=1.14 ; extra == 'pep8test'
+  - check-sdist ; extra == 'pep8test'
+  - click>=8.0.1 ; extra == 'pep8test'
+  requires_python: '>=3.8,!=3.9.0,!=3.9.1'
 - conda: https://conda.anaconda.org/conda-forge/win-64/debugpy-1.8.17-py314h8b4fd5f_0.conda
   sha256: 2a3ed921246f158c2061e5807d642dbb51b68865ef763a2337636fc81e520707
   md5: e0ca77b2ee1abdce860b21292d1e8a07
@@ -818,6 +851,18 @@ packages:
   purls: []
   size: 99909095
   timestamp: 1761668703167
+- pypi: https://files.pythonhosted.org/packages/c2/dc/18d48843499e278538890dc709e9ee3dea8375f8be8e82682851df1b48b5/msal-1.34.0-py3-none-any.whl
+  name: msal
+  version: 1.34.0
+  sha256: f669b1644e4950115da7a176441b0e13ec2975c29528d8b9e81316023676d6e1
+  requires_dist:
+  - requests>=2.0.0,<3
+  - pyjwt[crypto]>=1.0.0,<3
+  - cryptography>=2.5,<49
+  - pymsalruntime>=0.14,<0.19 ; python_full_version >= '3.6' and sys_platform == 'win32' and extra == 'broker'
+  - pymsalruntime>=0.17,<0.19 ; python_full_version >= '3.8' and sys_platform == 'darwin' and extra == 'broker'
+  - pymsalruntime>=0.18,<0.19 ; python_full_version >= '3.8' and sys_platform == 'linux' and extra == 'broker'
+  requires_python: '>=3.8'
 - conda: https://conda.anaconda.org/conda-forge/noarch/mypy_extensions-1.1.0-pyha770c72_0.conda
   sha256: 6ed158e4e5dd8f6a10ad9e525631e35cee8557718f83de7a4e3966b1f772c4b1
   md5: e9c622e0d00fa24a6292279af3ab6d06
@@ -1028,6 +1073,25 @@ packages:
   - pkg:pypi/pygments?source=hash-mapping
   size: 889287
   timestamp: 1750615908735
+- pypi: https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl
+  name: pyjwt
+  version: 2.10.1
+  sha256: dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb
+  requires_dist:
+  - cryptography>=3.4.0 ; extra == 'crypto'
+  - coverage[toml]==5.0.4 ; extra == 'dev'
+  - cryptography>=3.4.0 ; extra == 'dev'
+  - pre-commit ; extra == 'dev'
+  - pytest>=6.0.0,<7.0.0 ; extra == 'dev'
+  - sphinx ; extra == 'dev'
+  - sphinx-rtd-theme ; extra == 'dev'
+  - zope-interface ; extra == 'dev'
+  - sphinx ; extra == 'docs'
+  - sphinx-rtd-theme ; extra == 'docs'
+  - zope-interface ; extra == 'docs'
+  - coverage[toml]==5.0.4 ; extra == 'tests'
+  - pytest>=6.0.0,<7.0.0 ; extra == 'tests'
+  requires_python: '>=3.9'
 - pypi: https://files.pythonhosted.org/packages/f9/e8/989f4eaa369c7166dc24f0eaa3023f13788c40ff1b96701f7047421554a8/pymupdf-1.26.6-cp310-abi3-win_amd64.whl
   name: pymupdf
   version: 1.26.6

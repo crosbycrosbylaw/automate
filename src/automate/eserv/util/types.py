@@ -5,7 +5,6 @@ __all__ = [
     'CredentialConfig',
     'CredentialManager',
     'CredentialManager',
-    'CredentialType',
     'DropboxManager',
     'EmailState',
     'EmailStateConfig',
@@ -36,6 +35,6 @@ from .email_state import EmailState
 from .error_tracking import ErrorTracker
 from .index_cache import IndexCache
 from .notifications import NotificationConfig, Notifier
-from .oauth_manager import CredentialManager, CredentialType, OAuthCredential, RefreshHandler
+from .oauth_manager import CredentialManager, OAuthCredential, RefreshHandler
 from .pdf_utils import TextExtractor
 from .target_finder import CaseMatch, FolderMatcher, PartyExtractor

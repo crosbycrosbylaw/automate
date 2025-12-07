@@ -3,10 +3,17 @@ from __future__ import annotations
 import typing
 
 if typing.TYPE_CHECKING:
-    __all__ = ['ErrorDict', 'ProcessStatus', 'ProcessedResultDict']
+    __all__ = [
+        'CredentialType',
+        'CredentialsJSON',
+        'ErrorDict',
+        'ProcessStatus',
+        'ProcessedResultDict',
+    ]
 
     from typing import Any, Literal, NotRequired, ReadOnly, Required, TypedDict, type_check_only
 
+    type CredentialType = Literal['dropbox', 'microsoft-outlook']
     type ProcessStatus = Literal['success', 'error']
 
     @type_check_only
@@ -37,3 +44,16 @@ if typing.TYPE_CHECKING:
         subject: ReadOnly[str]
 
         processed_at: ReadOnly[str]
+
+    @type_check_only
+    class CredentialsJSON(TypedDict):
+        type: CredentialType
+        account: NotRequired[str]
+        client_id: str
+        client_secret: str
+        token_type: str
+        scope: str
+        access_token: str
+        refresh_token: str
+        expires_at: NotRequired[str]
+        expires_in: NotRequired[int]
