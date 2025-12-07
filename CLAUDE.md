@@ -109,21 +109,26 @@ pixi run push
 
 **Credential Management (`util/oauth_manager.py`):**
 
--   **`CredentialManager`** - OAuth2 token management for Dropbox + Outlook
-    -   Unified refresh mechanism using `requests.post()` for both credential types
+-   **`CredentialManager`** - Dual-mode OAuth2 token management for Dropbox + Outlook
+    -   Dropbox: Manual OAuth2 refresh using `requests.post()`
+    -   Outlook: MSAL-powered refresh with automatic token caching
     -   Lazy token refresh (within 5 min of expiry)
     -   Thread-safe credential updates with locking
     -   Automatic persistence on refresh
     -   Flat JSON serialization (no nested dicts)
 -   **`OAuthCredential`** - Immutable credential dataclass
-    -   Pure data container (no client storage)
+    -   Pure data container (no client storage for Dropbox; MSAL app for Outlook)
     -   `update_from_refresh()` method creates new instances (immutable pattern)
     -   `refresh()` method orchestrates token refresh via handlers
-    -   `export()` serializes to flat JSON structure
+    -   `export()` serializes to flat JSON structure (excludes `msal_app`)
+    -   `msal_app` field stores MSAL ConfidentialClientApplication instance (Outlook only)
+    -   `msal_migrated` flag tracks migration status (persisted to JSON)
 -   **Refresh handlers**:
-    -   `_refresh_dropbox()` - Dropbox OAuth2 token refresh
-    -   `_refresh_outlook()` - Microsoft OAuth2 token refresh
-    -   Both use identical `requests.post()` pattern
+    -   `_refresh_dropbox()` - Dropbox OAuth2 token refresh via `requests.post()`
+    -   `_refresh_outlook_msal()` - Microsoft OAuth2 token refresh via MSAL
+        -   Migration mode: First refresh uses `acquire_token_by_refresh_token()`
+        -   Normal mode: Subsequent refreshes use `acquire_token_silent()` with account cache
+        -   Three-tier fallback: silent → refresh_token → error
 
 **Utility Subpackage (`util/`):**
 
@@ -148,7 +153,8 @@ pixi run push
 ### Key Dependencies
 
 -   `beautifulsoup4` (bs4) - HTML parsing
--   `requests` - HTTP client + OAuth2 token refresh
+-   `requests` - HTTP client + OAuth2 token refresh (Dropbox)
+-   `msal` - Microsoft Authentication Library for Python (Outlook OAuth2)
 -   `dropbox` - Dropbox SDK
 -   `pymupdf` (fitz) - PDF text extraction
 -   `rapidfuzz` - Fuzzy string matching
@@ -178,6 +184,39 @@ pixi run push
     -   Pattern D (Mock Factory) optional optimization for repetitive patching (10+ tests with identical patches)
 
 ## Development History
+
+### MSAL Migration for Outlook Authentication (December 2025)
+
+**Major enhancement:** Migrated Microsoft Outlook authentication from manual OAuth2 to MSAL (Microsoft Authentication Library for Python).
+
+**Changes:**
+
+-   **Dual-mode credential system** - Unified CredentialManager now supports both manual OAuth2 (Dropbox) and MSAL-powered refresh (Outlook)
+-   **MSAL integration** - Added `msal_app` field to OAuthCredential for storing ConfidentialClientApplication instance
+-   **Automatic migration** - Existing refresh tokens automatically migrated on first refresh via `acquire_token_by_refresh_token()`
+-   **Silent refresh** - Post-migration refreshes use `acquire_token_silent()` with MSAL's account cache
+-   **Migration tracking** - New `msal_migrated` boolean field persisted to credentials.json
+-   **Backward compatibility** - Old credentials.json format automatically upgraded on first load
+-   **Comprehensive testing** - Added 11 new tests in TestMSALIntegration class covering migration, silent refresh, fallback logic, and dual-mode operation
+
+**Implementation details:**
+
+-   Replaced `_refresh_outlook()` with `_refresh_outlook_msal()` handler
+-   MSAL app initialized on credential load for Outlook, recreated each session (not persisted)
+-   Three-tier fallback: `acquire_token_silent()` → `acquire_token_by_refresh_token()` → error
+-   `export()` method excludes `msal_app` from JSON serialization (ephemeral)
+-   `_refresh()` method sets `msal_migrated=True` after first successful refresh
+
+**Benefits:**
+
+-   Standards-compliant OAuth2 implementation
+-   Automatic token caching and refresh by MSAL
+-   Built-in retry logic and error handling
+-   Better logging and diagnostics
+-   Future-proof for Microsoft identity platform changes
+-   Zero consumer impact (GraphClient unchanged)
+
+**Test coverage:** 142+ tests (131 existing + 11 new MSAL tests)
 
 ### Mock Factory Pattern Standardization (December 2025)
 

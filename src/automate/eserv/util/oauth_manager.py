@@ -38,21 +38,75 @@ def _refresh_dropbox(cred: OAuthCredential[Dropbox]) -> dict[str, Any]:
     return response.json()
 
 
-def _refresh_outlook(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
-    """Refresh Microsoft Outlook token and return updated token data."""
-    response = requests.post(
-        'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-        data={
-            'grant_type': 'refresh_token',
-            'refresh_token': cred.refresh_token,
-            'client_id': cred.client_id,
-            'client_secret': cred.client_secret,
-            'scope': cred.scope,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+def _refresh_outlook_msal(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
+    """Refresh Microsoft Outlook token using MSAL.
+
+    Handles two modes:
+    1. Migration mode: First refresh uses acquire_token_by_refresh_token()
+    2. Normal mode: Subsequent refreshes use acquire_token_silent()
+
+    Args:
+        cred: Outlook credential with MSAL app instance
+
+    Returns:
+        Token data dict with access_token, refresh_token, expires_in
+
+    Raises:
+        RuntimeError: If token refresh fails
+    """
+    import msal
+
+    if cred.msal_app is None:
+        # Initialize MSAL app (lazy creation)
+        cred.msal_app = msal.ConfidentialClientApplication(
+            client_id=cred.client_id,
+            client_credential=cred.client_secret,
+            authority='https://login.microsoftonline.com/common',
+        )
+
+    # Migration mode: Import existing refresh token into MSAL
+    if not cred.msal_migrated:
+        result = cred.msal_app.acquire_token_by_refresh_token(
+            refresh_token=cred.refresh_token,
+            scopes=cred.scope.split(),
+        )
+        # Note: Migration flag updated by caller after persist()
+
+    # Normal mode: Use MSAL cache for automatic refresh
+    else:
+        accounts = cred.msal_app.get_accounts()
+        if not accounts:
+            # Fallback: Rebuild cache from refresh token
+            result = cred.msal_app.acquire_token_by_refresh_token(
+                refresh_token=cred.refresh_token,
+                scopes=cred.scope.split(),
+            )
+        else:
+            result = cred.msal_app.acquire_token_silent(
+                scopes=cred.scope.split(),
+                account=accounts[0],
+            )
+
+            # If silent refresh fails, fallback to refresh token
+            if result is None or 'error' in result:
+                result = cred.msal_app.acquire_token_by_refresh_token(
+                    refresh_token=cred.refresh_token,
+                    scopes=cred.scope.split(),
+                )
+
+    # Check for errors
+    if result is None or 'error' in result:
+        error_msg = result.get('error_description', 'Unknown error') if result else 'No result'
+        raise RuntimeError(f'MSAL token refresh failed: {error_msg}')
+
+    # Return normalized token data (matches requests.post() format)
+    return {
+        'access_token': result['access_token'],
+        'refresh_token': result.get('refresh_token', cred.refresh_token),  # May not return new RT
+        'token_type': result.get('token_type', 'bearer'),
+        'scope': ' '.join(result.get('scope', cred.scope.split())),
+        'expires_in': result.get('expires_in', 3600),
+    }
 
 
 @dataclass(slots=True)
@@ -73,6 +127,8 @@ class OAuthCredential[T = Any]:
     expires_at: datetime | None = None
 
     handler: RefreshHandler | None = field(default=None, repr=False)
+    msal_app: Any = field(default=None, repr=False)  # msal.ConfidentialClientApplication
+    msal_migrated: bool = False
 
     def __str__(self) -> str:
         """Return the access token as string representation."""
@@ -93,6 +149,8 @@ class OAuthCredential[T = Any]:
 
         # Remove internal fields
         data.pop('handler', None)
+        data.pop('msal_app', None)
+        # Note: msal_migrated IS serialized (persistence needed)
 
         return data
 
@@ -198,6 +256,20 @@ class CredentialManager:
             if 'expires_at' in item:
                 expires_at = datetime.fromisoformat(item['expires_at'])
 
+            # Parse MSAL migration status (default False for backward compat)
+            msal_migrated = item.get('msal_migrated', False)
+
+            # Initialize MSAL app for Outlook credentials
+            msal_app = None
+            if cred_type == 'microsoft-outlook':
+                import msal
+
+                msal_app = msal.ConfidentialClientApplication(
+                    client_id=item['client_id'],
+                    client_credential=item['client_secret'],
+                    authority='https://login.microsoftonline.com/common',
+                )
+
             self._credentials[cred_type] = OAuthCredential(
                 type=cred_type,
                 account=item['account'],
@@ -209,6 +281,8 @@ class CredentialManager:
                 refresh_token=item['refresh_token'],
                 expires_at=expires_at,
                 handler=self._resolve_refresh_handler(cred_type),
+                msal_app=msal_app,
+                msal_migrated=msal_migrated,
             )
 
     @staticmethod
@@ -217,7 +291,7 @@ class CredentialManager:
             case 'dropbox':
                 return _refresh_dropbox
             case 'microsoft-outlook':
-                return _refresh_outlook
+                return _refresh_outlook_msal
 
         return None
 
@@ -265,7 +339,15 @@ class CredentialManager:
             message = f'Unknown credential type: {cred.type}'
             raise ValueError(message)
 
-        return cred.refresh()
+        refreshed = cred.refresh()
+
+        # Mark MSAL credentials as migrated after first successful refresh
+        if cred.type == 'microsoft-outlook' and not cred.msal_migrated:
+            from dataclasses import replace
+
+            refreshed = replace(refreshed, msal_migrated=True)
+
+        return refreshed
 
     def persist(self) -> None:
         """Write updated credentials back to disk."""
