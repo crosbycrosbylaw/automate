@@ -84,4 +84,6 @@ credentials.json
 **/.*cache*
 
 **/*.ipynb
+!ms_flow.ipynb
+
 pixi.lock

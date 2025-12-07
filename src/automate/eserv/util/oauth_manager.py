@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dropbox import Dropbox
+    from msal import ConfidentialClientApplication
 
     from automate.eserv.monitor.client import GraphClient
     from automate.eserv.types.typechecking import CredentialsJSON, CredentialType
@@ -127,8 +128,15 @@ class OAuthCredential[T = Any]:
     expires_at: datetime | None = None
 
     handler: RefreshHandler | None = field(default=None, repr=False)
-    msal_app: Any = field(default=None, repr=False)  # msal.ConfidentialClientApplication
-    msal_migrated: bool = False
+
+    msal_app: ConfidentialClientApplication | None = field(default=None)
+    msal_migrated: bool = field(default=False)
+
+    def msal(self) -> ConfidentialClientApplication:
+        if not self.msal_app:
+            raise AttributeError
+
+        return self.msal_app
 
     def __str__(self) -> str:
         """Return the access token as string representation."""
@@ -250,33 +258,23 @@ class CredentialManager:
 
         for item in data:
             item: CredentialsJSON
-            cred_type = item['type']
 
-            # Parse expiration
-
-            if expires_str := item.get('expires_at'):
-                expires_at = datetime.fromisoformat(expires_str)
-            elif expires_int := item.get('expires_in'):
-                expires_at = datetime.now(UTC) + timedelta(seconds=expires_int)
-            else:
-                expires_at = None
-
-            # Parse MSAL migration status (default False for backward compat)
-            msal_migrated = item.get('msal_migrated', False)
-
-            # Initialize MSAL app for Outlook credentials
-            msal_app = None
-            if cred_type == 'microsoft-outlook':
+            if (tp := item['type']) == 'microsoft-outlook':
                 import msal
 
-                msal_app = msal.ConfidentialClientApplication(
-                    client_id=item['client_id'],
-                    client_credential=item['client_secret'],
+                ms_app = msal.ConfidentialClientApplication(
+                    **{
+                        k.replace('secret', 'credential'): item[k]
+                        for k in item
+                        if k.startswith('client')
+                    },
                     authority='https://login.microsoftonline.com/common',
                 )
+            else:
+                ms_app = None
 
-            self._credentials[cred_type] = OAuthCredential(
-                type=cred_type,
+            self._credentials[tp] = OAuthCredential(
+                type=tp,
                 account=item.get('account', 'anonymous'),
                 client_id=item['client_id'],
                 client_secret=item['client_secret'],
@@ -284,10 +282,10 @@ class CredentialManager:
                 scope=item['scope'],
                 access_token=item['access_token'],
                 refresh_token=item['refresh_token'],
-                expires_at=expires_at,
-                handler=self._resolve_refresh_handler(cred_type),
-                msal_app=msal_app,
-                msal_migrated=msal_migrated,
+                expires_at=self._parse_expiry(item),
+                handler=self._resolve_refresh_handler(tp),
+                msal_app=ms_app,
+                msal_migrated=item.get('msal_migrated', False),
             )
 
     @staticmethod
@@ -301,10 +299,10 @@ class CredentialManager:
         return None
 
     @staticmethod
-    def _parse_expiry(data: dict[str, Any]) -> datetime | None:
+    def _parse_expiry(data: CredentialsJSON) -> datetime | None:
         """Parse expiry from token data if present."""
-        if 'expires_at' in data:
-            return datetime.fromisoformat(data['expires_at'])
+        if 'expires_at' in data and (value := data['expires_at']):
+            return datetime.fromisoformat(value)
         if 'expires_in' in data:
             # Compute from issued_at + expires_in
             issued = datetime.fromisoformat(data.get('issued_at', datetime.now(UTC).isoformat()))
