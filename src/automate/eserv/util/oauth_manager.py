@@ -301,12 +301,12 @@ class CredentialManager:
     @staticmethod
     def _parse_expiry(data: CredentialsJSON) -> datetime | None:
         """Parse expiry from token data if present."""
-        if 'expires_at' in data and (value := data['expires_at']):
-            return datetime.fromisoformat(value)
-        if 'expires_in' in data:
+        if 'expires_at' in data and (datestr := data['expires_at']):
+            return datetime.fromisoformat(datestr)
+        if 'expires_in' in data and (seconds := data['expires_in']):
             # Compute from issued_at + expires_in
             issued = datetime.fromisoformat(data.get('issued_at', datetime.now(UTC).isoformat()))
-            return issued + timedelta(seconds=data['expires_in'])
+            return issued + timedelta(seconds=seconds)
         return None
 
     def get_credential(self, cred_type: CredentialType) -> OAuthCredential:
