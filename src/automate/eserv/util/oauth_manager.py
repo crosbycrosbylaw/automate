@@ -108,12 +108,12 @@ def _parse_credential_json(data: CredentialsJSON | dict[str, Any]) -> OAuthCrede
         case 'dropbox':
             from automate.eserv.util.dbx_manager import dropbox_manager_factory
 
-            keywords['client_manager'] = dropbox_manager_factory
+            keywords['manager_factory'] = dropbox_manager_factory
             keywords['handler'] = _refresh_dropbox
         case 'microsoft-outlook':
             from automate.eserv.util.msal_manager import msauth_manager_factory
 
-            keywords['client_manager'] = msauth_manager_factory
+            keywords['manager_factory'] = msauth_manager_factory
             keywords['handler'] = _refresh_outlook_msal
 
     keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
@@ -132,29 +132,32 @@ class OAuthCredential[T = Any]:
     The string representation of an `OAuthCredential` evaluates to it's access token.
     """
 
-    client_manager: Callable[[Self], T]
+    manager_factory: Callable[[Self], T] = field(repr=False, metadata={'internal_only': True})
 
     type: CredentialType
-    account: str
     client_id: str
     client_secret: str
     token_type: str
     scope: str
     access_token: str
     refresh_token: str
+    account: str | None = None
     expires_at: datetime | None = None
+    extra_properties: dict[str, Any] = field(default_factory=dict, metadata={'internal_only': True})
 
-    extra_properties: dict[str, Any] = field(default_factory=dict)
+    handler: RefreshHandler | None = field(
+        default=None,
+        repr=False,
+        metadata={'internal_only': True},
+    )
+    manager: T = field(
+        init=False,
+        repr=False,
+        metadata={'internal_only': True},
+    )
 
-    handler: RefreshHandler | None = field(default=None, repr=False)
-
-    _manager: T = field(init=False)
-
-    @property
-    def manager(self) -> T:
-        if not hasattr(self, '_manager'):
-            self._manager = self.client_manager(self)
-        return self._manager
+    def __post_init__(self) -> None:
+        self.manager = self.manager_factory(self)
 
     def __getitem__(self, name: str) -> Any | None:
         return self.extra_properties.get(name)
@@ -170,29 +173,14 @@ class OAuthCredential[T = Any]:
             Flat dictionary with all credential fields.
 
         """
-        # Build dict manually to avoid issues with init=False fields
         data = {
-            'type': self.type,
-            'account': self.account,
-            'client_id': self.client_id,
-            'client_secret': self.client_secret,
-            'token_type': self.token_type,
-            'scope': self.scope,
-            'access_token': self.access_token,
-            'refresh_token': self.refresh_token,
-            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            f.name: getattr(self, f.name) for f in fields(self) if 'internal_only' not in f.metadata
         }
 
-        # Add extra_properties (includes msal_migrated, etc.)
-        data.update(self.extra_properties)
+        if isinstance(exp := data['expires_at'], datetime):
+            data.update(expires_at=exp.isoformat())
 
-        # Explicitly exclude internal fields
-        data.pop('handler', None)
-        data.pop('msal_app', None)
-        data.pop('client_manager', None)
-        data.pop('_manager', None)
-
-        return data
+        return {**data, **self.extra_properties}
 
     def update_from_refresh(self, token_data: dict[str, Any]) -> OAuthCredential:
         """Create new credential with updated token information.

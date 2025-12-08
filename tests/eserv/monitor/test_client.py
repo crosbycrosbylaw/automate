@@ -19,6 +19,7 @@ from requests.exceptions import HTTPError
 
 from automate.eserv.monitor.client import graph_client_factory
 from automate.eserv.monitor.flags import status_flag_factory
+from automate.eserv.types import *
 
 if TYPE_CHECKING:
     from automate.eserv.types import GraphClient
@@ -27,9 +28,11 @@ if TYPE_CHECKING:
 @pytest.fixture
 def mock_credential() -> Mock:
     """Create mock OAuth credential."""
-    cred = Mock(spec=['access_token', 'set_client'])
+    cred = Mock(spec=['access_token', 'manager', 'token_type', 'service'])
     cred.access_token = 'test_token_12345'
-    cred.set_client = Mock()
+    cred.token_type = 'Bearer'
+    cred.manager = Mock()
+    cred.service = Mock()
     return cred
 
 

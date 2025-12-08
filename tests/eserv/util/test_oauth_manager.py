@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def dropbox_credential():
     return OAuthCredential(
-        client_manager=dropbox_manager_factory,
+        manager_factory=dropbox_manager_factory,
         type='dropbox',
         account='test-business',
         client_id='test_client_id',
@@ -44,7 +44,7 @@ def dropbox_credential():
 @pytest.fixture
 def microsoft_credential():
     return OAuthCredential(
-        client_manager=msauth_manager_factory,
+        manager_factory=msauth_manager_factory,
         type='microsoft-outlook',
         account='test-account',
         client_id='outlook_client_id',

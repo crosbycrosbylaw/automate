@@ -6,13 +6,20 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 import requests
+from msgraph.graph_service_client import GraphServiceClient
 from rampy import create_field_factory
 from requests.exceptions import HTTPError
 
 from automate.eserv.record import record_factory
 
 if TYPE_CHECKING:
-    from automate.eserv.types import EmailRecord, MonitoringConfig, OAuthCredential, StatusFlag
+    from automate.eserv.types import (
+        EmailRecord,
+        MicrosoftAuthManager,
+        MonitoringConfig,
+        OAuthCredential,
+        StatusFlag,
+    )
 
 _STATUS_CODES: Final[dict[str, int]] = {'rate-limit': 429, 'server-error': 500}
 
@@ -20,19 +27,30 @@ _STATUS_CODES: Final[dict[str, int]] = {'rate-limit': 429, 'server-error': 500}
 class GraphClient:
     """Microsoft Graph API client for email monitoring."""
 
-    def __init__(self, credential: OAuthCredential[GraphClient], config: MonitoringConfig) -> None:
+    def __init__(
+        self, credential: OAuthCredential[MicrosoftAuthManager], config: MonitoringConfig
+    ) -> None:
         """Initialize a Microsoft Graph client."""
-        self.cred = credential
         self.config = config
+
+        self.cred = credential
+        self.token = self.cred.manager.acquire_token()
+
         self._folder_id_cache: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def _get_headers(self) -> dict[str, str]:
         """Get authorization headers with current access token."""
         return {
-            'Authorization': f'Bearer {self.cred.access_token}',
+            'Authorization': f'{self.cred.token_type} {self.cred.access_token}',
             'Content-Type': 'application/json',
         }
+
+    @property
+    def service(self) -> GraphServiceClient:
+        if not hasattr(self, '_service'):
+            self._service = GraphServiceClient(self.cred.manager)
+        return self._service
 
     @staticmethod
     def _is_retryable_error(status_code: int) -> bool:
@@ -112,6 +130,17 @@ class GraphClient:
         # Split path and walk hierarchy
         path_parts = self.config.folder_path.split('/')
         current_id = 'root'
+
+        # target = path_parts[-1]
+
+        # response = await self.service.me.mail_folders.get()
+
+        # if folders := response and response.value:
+        #     for f in folders:
+        #         if f.id and f.display_name == target:
+        #             with self._lock:
+        #                 self._folder_id_cache['monitoring'] = f.id
+        #             return f.id
 
         for part in path_parts:
             # GET /me/mailFolders/{parentId}/childFolders to find child with matching name
