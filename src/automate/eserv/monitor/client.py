@@ -129,21 +129,22 @@ class GraphClient:
 
         # Split path and walk hierarchy
         path_parts = self.config.folder_path.split('/')
-        current_id = 'root'
 
         # target = path_parts[-1]
-
         # response = await self.service.me.mail_folders.get()
-
+        #
         # if folders := response and response.value:
         #     for f in folders:
         #         if f.id and f.display_name == target:
         #             with self._lock:
         #                 self._folder_id_cache['monitoring'] = f.id
         #             return f.id
+        #
+        # raise FileNotFoundError(f'{target=}')
+
+        current_id = 'root'
 
         for part in path_parts:
-            # GET /me/mailFolders/{parentId}/childFolders to find child with matching name
             result = self._request(
                 'GET',
                 path=f'/me/mailFolders/{current_id}/childFolders',
