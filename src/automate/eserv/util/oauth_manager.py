@@ -1,44 +1,36 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Literal, Self, overload
 
 import orjson
-import requests
 from rampy.util import create_field_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from dropbox import Dropbox
-    from msal import ConfidentialClientApplication
-
-    from automate.eserv.monitor.client import GraphClient
+    from automate.eserv.types import DropboxManager, MicrosoftAuthManager
     from automate.eserv.types.typechecking import CredentialsJSON, CredentialType
 
 type RefreshHandler = Callable[[OAuthCredential], dict[str, Any]]
 
 
-def _refresh_dropbox(cred: OAuthCredential[Dropbox]) -> dict[str, Any]:
+def _refresh_dropbox(cred: OAuthCredential[DropboxManager]) -> dict[str, Any]:
     """Refresh Dropbox token and return updated token data."""
-    response = requests.post(
-        'https://api.dropbox.com/oauth2/token',
-        data={
-            'grant_type': 'refresh_token',
-            'refresh_token': cred.refresh_token,
-            'client_id': cred.client_id,
-            'client_secret': cred.client_secret,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    return response.json()
+    dbx_app = cred.manager.client
+    dbx_app.check_and_refresh_access_token()
+    return {
+        'access_token': dbx_app._oauth2_access_token,
+        'expires_at': dbx_app._oauth2_access_token_expiration,
+        'refresh_token': dbx_app._oauth2_refresh_token,
+        'scope': ' '.join(str(x) for x in dbx_app._scope or []),
+    }
 
 
-def _refresh_outlook_msal(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
+def _refresh_outlook_msal(cred: OAuthCredential[MicrosoftAuthManager]) -> dict[str, Any]:
     """Refresh Microsoft Outlook token using MSAL.
 
     Handles two modes:
@@ -55,52 +47,31 @@ def _refresh_outlook_msal(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
         RuntimeError: If token refresh fails
 
     """
-    import msal
+    # Filter out MSAL reserved scopes (offline_access, openid, profile)
+    # MSAL handles these automatically and raises ValueError if passed explicitly
+    RESERVED_SCOPES = {'offline_access', 'openid', 'profile'}
+    scopes = [s for s in cred.scope.split() if s not in RESERVED_SCOPES]
 
-    if cred.msal_app is None:
-        # Initialize MSAL app (lazy creation)
-        cred.msal_app = msal.ConfidentialClientApplication(
-            client_id=cred.client_id,
-            client_credential=cred.client_secret,
-            authority='https://login.microsoftonline.com/common',
+    result = None
+    migrated = cred['msal_migrated'] or False
+    ms_app = cred.manager.client
+
+    if migrated and (accounts := ms_app.get_accounts()):
+        result = ms_app.acquire_token_silent(
+            scopes=scopes,
+            account=accounts[0],
         )
 
-    # Migration mode: Import existing refresh token into MSAL
-    if not cred.msal_migrated:
-        result = cred.msal_app.acquire_token_by_refresh_token(
+    if result is None or 'error' in result:
+        result = ms_app.acquire_token_by_refresh_token(
             refresh_token=cred.refresh_token,
-            scopes=cred.scope.split(),
+            scopes=scopes,
         )
-        # Note: Migration flag updated by caller after persist()
 
-    # Normal mode: Use MSAL cache for automatic refresh
-    else:
-        accounts = cred.msal_app.get_accounts()
-        if not accounts:
-            # Fallback: Rebuild cache from refresh token
-            result = cred.msal_app.acquire_token_by_refresh_token(
-                refresh_token=cred.refresh_token,
-                scopes=cred.scope.split(),
-            )
-        else:
-            result = cred.msal_app.acquire_token_silent(
-                scopes=cred.scope.split(),
-                account=accounts[0],
-            )
-
-            # If silent refresh fails, fallback to refresh token
-            if result is None or 'error' in result:
-                result = cred.msal_app.acquire_token_by_refresh_token(
-                    refresh_token=cred.refresh_token,
-                    scopes=cred.scope.split(),
-                )
-
-    # Check for errors
     if result is None or 'error' in result:
         error_msg = result.get('error_description', 'Unknown error') if result else 'No result'
         raise RuntimeError(f'MSAL token refresh failed: {error_msg}')
 
-    # Return normalized token data (matches requests.post() format)
     return {
         'access_token': result['access_token'],
         'refresh_token': result.get('refresh_token', cred.refresh_token),  # May not return new RT
@@ -110,12 +81,58 @@ def _refresh_outlook_msal(cred: OAuthCredential[GraphClient]) -> dict[str, Any]:
     }
 
 
+def _parse_expiry(data: CredentialsJSON | dict[str, Any]) -> datetime | None:
+    expires_key = next((k for k in data if k.startswith('expires')), '')
+    expires_val = data.pop(expires_key, None)
+
+    match expires_key:
+        case 'expires_in':
+            issued = data.pop('issued_at', '') or datetime.now(UTC).isoformat()
+            if isinstance(expires_val, int | str):
+                duration = timedelta(seconds=int(expires_val))
+                return datetime.fromisoformat(issued) + duration
+        case 'expires_at':
+            if isinstance(expires_val, datetime):
+                return expires_val
+            if isinstance(expires_val, str):
+                return datetime.fromisoformat(expires_val)
+        case _:
+            return None
+
+
+def _parse_credential_json(data: CredentialsJSON | dict[str, Any]) -> OAuthCredential[Any]:
+    """Parse fields from token data."""
+    keywords: dict[str, Any] = {}
+
+    match data['type']:
+        case 'dropbox':
+            from automate.eserv.util.dbx_manager import dropbox_manager_factory
+
+            keywords['client_manager'] = dropbox_manager_factory
+            keywords['handler'] = _refresh_dropbox
+        case 'microsoft-outlook':
+            from automate.eserv.util.msal_manager import msauth_manager_factory
+
+            keywords['client_manager'] = msauth_manager_factory
+            keywords['handler'] = _refresh_outlook_msal
+
+    keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
+    keywords['expires_at'] = _parse_expiry(data)
+
+    return OAuthCredential(
+        **keywords,
+        extra_properties={key: val for key, val in data.items() if key not in keywords},
+    )
+
+
 @dataclass(slots=True)
 class OAuthCredential[T = Any]:
     """OAuth credential with token and expiry.
 
     The string representation of an `OAuthCredential` evaluates to it's access token.
     """
+
+    client_manager: Callable[[Self], T]
 
     type: CredentialType
     account: str
@@ -127,16 +144,20 @@ class OAuthCredential[T = Any]:
     refresh_token: str
     expires_at: datetime | None = None
 
+    extra_properties: dict[str, Any] = field(default_factory=dict)
+
     handler: RefreshHandler | None = field(default=None, repr=False)
 
-    msal_app: ConfidentialClientApplication | None = field(default=None)
-    msal_migrated: bool = field(default=False)
+    _manager: T = field(init=False)
 
-    def msal(self) -> ConfidentialClientApplication:
-        if not self.msal_app:
-            raise AttributeError
+    @property
+    def manager(self) -> T:
+        if not hasattr(self, '_manager'):
+            self._manager = self.client_manager(self)
+        return self._manager
 
-        return self.msal_app
+    def __getitem__(self, name: str) -> Any | None:
+        return self.extra_properties.get(name)
 
     def __str__(self) -> str:
         """Return the access token as string representation."""
@@ -149,16 +170,27 @@ class OAuthCredential[T = Any]:
             Flat dictionary with all credential fields.
 
         """
-        data = asdict(self)
+        # Build dict manually to avoid issues with init=False fields
+        data = {
+            'type': self.type,
+            'account': self.account,
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'token_type': self.token_type,
+            'scope': self.scope,
+            'access_token': self.access_token,
+            'refresh_token': self.refresh_token,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+        }
 
-        # Convert datetime to ISO string
-        if self.expires_at:
-            data['expires_at'] = self.expires_at.isoformat()
+        # Add extra_properties (includes msal_migrated, etc.)
+        data.update(self.extra_properties)
 
-        # Remove internal fields
+        # Explicitly exclude internal fields
         data.pop('handler', None)
         data.pop('msal_app', None)
-        # Note: msal_migrated IS serialized (persistence needed)
+        data.pop('client_manager', None)
+        data.pop('_manager', None)
 
         return data
 
@@ -174,22 +206,14 @@ class OAuthCredential[T = Any]:
         """
         from dataclasses import replace
 
-        # Parse expiration
-        if 'expires_at' in token_data:
-            expires_at = datetime.fromisoformat(token_data['expires_at'])
-        elif 'expires_in' in token_data:
-            expires_at = datetime.now(UTC) + timedelta(seconds=token_data['expires_in'])
-        else:
-            expires_at = self.expires_at  # Keep existing
-
-        # Update only relevant fields
+        # Create new instance with updated fields
         return replace(
             self,
             access_token=token_data.get('access_token', self.access_token),
             refresh_token=token_data.get('refresh_token', self.refresh_token),
             scope=token_data.get('scope', self.scope),
             token_type=token_data.get('token_type', self.token_type),
-            expires_at=expires_at,
+            expires_at=_parse_expiry(token_data),
         )
 
     def refresh(self) -> OAuthCredential:
@@ -256,60 +280,11 @@ class CredentialManager:
         with self.credentials_path.open('rb') as f:
             data = orjson.loads(f.read())
 
-        for item in data:
-            item: CredentialsJSON
+        for json in data:
+            cred = _parse_credential_json(json)
+            self._credentials[cred.type] = cred
 
-            if (tp := item['type']) == 'microsoft-outlook':
-                import msal
-
-                ms_app = msal.ConfidentialClientApplication(
-                    **{
-                        k.replace('secret', 'credential'): item[k]
-                        for k in item
-                        if k.startswith('client')
-                    },
-                    authority='https://login.microsoftonline.com/common',
-                )
-            else:
-                ms_app = None
-
-            self._credentials[tp] = OAuthCredential(
-                type=tp,
-                account=item.get('account', 'anonymous'),
-                client_id=item['client_id'],
-                client_secret=item['client_secret'],
-                token_type=item['token_type'],
-                scope=item['scope'],
-                access_token=item['access_token'],
-                refresh_token=item['refresh_token'],
-                expires_at=self._parse_expiry(item),
-                handler=self._resolve_refresh_handler(tp),
-                msal_app=ms_app,
-                msal_migrated=item.get('msal_migrated', False),
-            )
-
-    @staticmethod
-    def _resolve_refresh_handler(cred_type: str) -> RefreshHandler | None:
-        match cred_type:
-            case 'dropbox':
-                return _refresh_dropbox
-            case 'microsoft-outlook':
-                return _refresh_outlook_msal
-
-        return None
-
-    @staticmethod
-    def _parse_expiry(data: CredentialsJSON) -> datetime | None:
-        """Parse expiry from token data if present."""
-        if 'expires_at' in data and (datestr := data['expires_at']):
-            return datetime.fromisoformat(datestr)
-        if 'expires_in' in data and (seconds := data['expires_in']):
-            # Compute from issued_at + expires_in
-            issued = datetime.fromisoformat(data.get('issued_at', datetime.now(UTC).isoformat()))
-            return issued + timedelta(seconds=seconds)
-        return None
-
-    def get_credential(self, cred_type: CredentialType) -> OAuthCredential:
+    def get_credential(self, cred_type: CredentialType):
         """Get credential by type, refreshing if expired."""
         with self._lock:
             cred = self._credentials[cred_type]
@@ -320,6 +295,19 @@ class CredentialManager:
                 self.persist()
 
             return cred
+
+    if TYPE_CHECKING:
+
+        @overload
+        def __getitem__(
+            self, name: Literal['microsoft-outlook']
+        ) -> OAuthCredential[MicrosoftAuthManager]: ...
+        @overload
+        def __getitem__(self, name: Literal['dropbox']) -> OAuthCredential[DropboxManager]: ...
+
+    def __getitem__(self, name: CredentialType) -> OAuthCredential[Any]:
+        """Retrieve the named authorization credential, storing the value if not found in cache."""
+        return self.get_credential(name)
 
     @staticmethod
     def _is_expired(cred: OAuthCredential) -> bool:
@@ -345,10 +333,9 @@ class CredentialManager:
         refreshed = cred.refresh()
 
         # Mark MSAL credentials as migrated after first successful refresh
-        if cred.type == 'microsoft-outlook' and not cred.msal_migrated:
-            from dataclasses import replace
-
-            refreshed = replace(refreshed, msal_migrated=True)
+        if cred.type == 'microsoft-outlook' and not cred.extra_properties.get('msal_migrated'):
+            # Update extra_properties dict directly (msal_migrated is not a field)
+            refreshed.extra_properties['msal_migrated'] = True
 
         return refreshed
 
@@ -360,16 +347,4 @@ class CredentialManager:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
-if TYPE_CHECKING:
-
-    def credential_manager(json_path: Path) -> CredentialManager:
-        """Initialize the credential manager.
-
-        Args:
-            json_path: Path to the JSON file containing OAuth credentials.
-
-        """
-        ...
-
-
-credential_manager = create_field_factory(CredentialManager)
+cred_manager_factory = create_field_factory(CredentialManager)

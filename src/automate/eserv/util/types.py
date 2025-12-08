@@ -2,8 +2,6 @@ __all__ = [
     'CacheConfig',
     'CaseMatch',
     'Config',
-    'CredentialConfig',
-    'CredentialManager',
     'CredentialManager',
     'DropboxManager',
     'EmailState',
@@ -11,6 +9,7 @@ __all__ = [
     'ErrorTracker',
     'FolderMatcher',
     'IndexCache',
+    'MicrosoftAuthManager',
     'MonitoringConfig',
     'NotificationConfig',
     'Notifier',
@@ -25,7 +24,6 @@ __all__ = [
 from .configuration import (
     CacheConfig,
     Config,
-    CredentialConfig,
     EmailStateConfig,
     MonitoringConfig,
     PathsConfig,
@@ -34,6 +32,7 @@ from .dbx_manager import DropboxManager
 from .email_state import EmailState
 from .error_tracking import ErrorTracker
 from .index_cache import IndexCache
+from .msal_manager import MicrosoftAuthManager
 from .notifications import NotificationConfig, Notifier
 from .oauth_manager import CredentialManager, OAuthCredential, RefreshHandler
 from .pdf_utils import TextExtractor

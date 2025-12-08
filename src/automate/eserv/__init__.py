@@ -15,6 +15,7 @@ __all__ = [
     'extract_upload_info',
     'folder_matcher_factory',
     'index_cache_factory',
+    'msauth_manager_factory',
     'notifier_factory',
     'processor_factory',
     'record_factory',

@@ -9,6 +9,7 @@ __all__ = [
     'error_tracker_factory',
     'folder_matcher_factory',
     'index_cache_factory',
+    'msauth_manager_factory',
     'notifier_factory',
     'state_tracker_factory',
     'text_extractor_factory',
@@ -20,6 +21,7 @@ from .doc_store import document_store_factory
 from .email_state import state_tracker_factory
 from .error_tracking import error_tracker_factory
 from .index_cache import index_cache_factory
+from .msal_manager import msauth_manager_factory
 from .notifications import notifier_factory
 from .pdf_utils import text_extractor_factory
 from .target_finder import folder_matcher_factory

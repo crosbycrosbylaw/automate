@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import orjson
 import pytest
-import requests
 
-from automate.eserv.util import dropbox_manager_factory
+from automate.eserv.util import dropbox_manager_factory, msauth_manager_factory
 from automate.eserv.util.oauth_manager import (
     CredentialManager,
     OAuthCredential,
@@ -21,76 +21,88 @@ from automate.eserv.util.oauth_manager import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from automate.eserv.types import *
+
+
+@pytest.fixture
+def dropbox_credential():
+    return OAuthCredential(
+        client_manager=dropbox_manager_factory,
+        type='dropbox',
+        account='test-business',
+        client_id='test_client_id',
+        client_secret='test_client_secret',
+        token_type='bearer',
+        scope='files.content.write',
+        access_token='old_access_token',
+        refresh_token='test_refresh_token',
+        expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
+        handler=_refresh_dropbox,
+    )
+
+
+@pytest.fixture
+def microsoft_credential():
+    return OAuthCredential(
+        client_manager=msauth_manager_factory,
+        type='microsoft-outlook',
+        account='test-account',
+        client_id='outlook_client_id',
+        client_secret='outlook_client_secret',
+        token_type='bearer',
+        scope='Mail.Read offline_access',
+        access_token='old_outlook_token',
+        refresh_token='outlook_refresh_token',
+        expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
+        handler=_refresh_outlook_msal,
+        extra_properties={'msal_migrated': False},
+    )
+
 
 class TestTokenRefresh:
     """Test unified refresh mechanism for both Dropbox and Outlook."""
 
-    def test_refresh_dropbox_success(self):
+    def test_refresh_dropbox_success(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test successful Dropbox token refresh."""
-        # Create test credential
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test-business',
-            client_id='test_client_id',
-            client_secret='test_client_secret',
-            token_type='bearer',
-            scope='files.content.write',
-            access_token='old_access_token',
-            refresh_token='test_refresh_token',
-            expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
-            handler=_refresh_dropbox,
-        )
+        cred = dropbox_credential
 
-        # Mock API response
-        mock_response_data = {
-            'access_token': 'new_access_token',
-            'token_type': 'bearer',
-            'expires_in': 3600,
-        }
+        # Mock the Dropbox client
+        mock_client = Mock()
+        mock_client._oauth2_access_token = 'new_dropbox_token'
+        mock_client._oauth2_refresh_token = 'new_refresh_token'
+        mock_client._oauth2_access_token_expiration = datetime.now(UTC) + timedelta(hours=4)
+        mock_client._scope = ['files.content.write', 'files.metadata.read']
+        mock_client.check_and_refresh_access_token.return_value = None
 
-        with patch('requests.post') as mock_post:
-            mock_response = Mock()
-            mock_response.json.return_value = mock_response_data
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
+        # Create mock manager with client
+        mock_manager = Mock()
+        mock_manager.client = mock_client
 
-            # Call refresh handler
+        # Patch the manager property
+        with patch.object(type(cred), 'manager', property(lambda _: mock_manager)):
             result = _refresh_dropbox(cred)
 
-            # Assert requests.post called with correct params
-            mock_post.assert_called_once_with(
-                'https://api.dropbox.com/oauth2/token',
-                data={
-                    'grant_type': 'refresh_token',
-                    'refresh_token': 'test_refresh_token',
-                    'client_id': 'test_client_id',
-                    'client_secret': 'test_client_secret',
-                },
-                timeout=30,
-            )
+            # Assert handler called the refresh method
+            mock_client.check_and_refresh_access_token.assert_called_once()
 
-            # Assert correct response returned
-            assert result == mock_response_data
-            assert result['access_token'] == 'new_access_token'
+            # Assert returned data has correct structure
+            assert result['access_token'] == 'new_dropbox_token'
+            assert result['refresh_token'] == 'new_refresh_token'
+            assert result['expires_at'] == mock_client._oauth2_access_token_expiration
+            assert result['scope'] == 'files.content.write files.metadata.read'
 
-    def test_refresh_outlook_msal_success(self):
+    def test_refresh_outlook_msal_success(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test successful Outlook token refresh using MSAL (migration mode)."""
-        # Create test credential
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test-account',
-            client_id='outlook_client_id',
-            client_secret='outlook_client_secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='old_outlook_token',
-            refresh_token='outlook_refresh_token',
-            expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
-            handler=_refresh_outlook_msal,
-            msal_migrated=False,  # Migration mode
-        )
+        cred = microsoft_credential
 
-        # Mock MSAL response
+        # Mock MSAL app
+        mock_app = Mock()
         mock_msal_result = {
             'access_token': 'new_outlook_token',
             'refresh_token': 'new_refresh_token',
@@ -98,94 +110,88 @@ class TestTokenRefresh:
             'scope': ['Mail.Read', 'offline_access'],
             'expires_in': 3600,
         }
+        mock_app.get_accounts.return_value = []  # No accounts (migration mode)
+        mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
-            mock_app = Mock()
-            mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
-            MockMSAL.return_value = mock_app
+        # Create mock manager with MSAL client
+        mock_manager = Mock()
+        mock_manager.client = mock_app
 
-            # Call refresh handler
+        # Patch the manager property
+        with patch.object(type(cred), 'manager', property(lambda _: mock_manager)):
             result = _refresh_outlook_msal(cred)
 
-            # Assert MSAL app created with correct params
-            MockMSAL.assert_called_once_with(
-                client_id='outlook_client_id',
-                client_credential='outlook_client_secret',
-                authority='https://login.microsoftonline.com/common',
-            )
-
-            # Assert acquire_token_by_refresh_token called (migration mode)
+            # Assert acquire_token_by_refresh_token was called
+            # Note: offline_access is filtered out (reserved scope)
             mock_app.acquire_token_by_refresh_token.assert_called_once_with(
-                refresh_token='outlook_refresh_token',
-                scopes=['Mail.Read', 'offline_access'],
+                refresh_token=cred.refresh_token,
+                scopes=['Mail.Read'],  # offline_access filtered out
             )
 
-            # Assert correct normalized response returned
+            # Assert returned data has correct structure
             assert result['access_token'] == 'new_outlook_token'
             assert result['refresh_token'] == 'new_refresh_token'
             assert result['token_type'] == 'bearer'
             assert result['scope'] == 'Mail.Read offline_access'
             assert result['expires_in'] == 3600
 
-    def test_refresh_dropbox_network_error(self):
+    def test_refresh_dropbox_network_error(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test refresh handles network errors gracefully."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token',
-            refresh_token='refresh',
-            handler=_refresh_dropbox,
+        cred = dropbox_credential
+
+        # Mock the Dropbox client to raise network error
+        mock_client = Mock()
+        mock_client.check_and_refresh_access_token.side_effect = ConnectionError(
+            'Network unreachable'
         )
 
-        with patch('requests.post') as mock_post:
-            mock_post.side_effect = requests.ConnectionError('Network error')
+        # Create mock manager with client
+        mock_manager = Mock()
+        mock_manager.client = mock_client
 
-            with pytest.raises(requests.ConnectionError):
-                _refresh_dropbox(cred)
+        # Patch the manager property
+        with (
+            patch.object(type(cred), 'manager', property(lambda _: mock_manager)),
+            pytest.raises(ConnectionError, match='Network unreachable'),
+        ):
+            _refresh_dropbox(cred)
 
-    def test_refresh_dropbox_http_error(self):
+    def test_refresh_dropbox_http_error(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test refresh handles HTTP errors gracefully."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token',
-            refresh_token='invalid_refresh',
-            handler=_refresh_dropbox,
-        )
+        from dropbox.exceptions import AuthError
 
-        with patch('requests.post') as mock_post:
-            mock_response = Mock()
-            mock_response.raise_for_status.side_effect = requests.HTTPError('401 Unauthorized')
-            mock_post.return_value = mock_response
+        cred = dropbox_credential
 
-            with pytest.raises(requests.HTTPError):
-                _refresh_dropbox(cred)
+        # Mock the Dropbox client to raise auth error
+        mock_client = Mock()
+        mock_client.check_and_refresh_access_token.side_effect = AuthError('req_id', None)
 
-    def test_credential_refresh_integration(self):
+        # Create mock manager with client
+        mock_manager = Mock()
+        mock_manager.client = mock_client
+
+        # Patch the manager property
+        with (
+            patch.object(type(cred), 'manager', property(lambda _: mock_manager)),
+            pytest.raises(AuthError),
+        ):
+            _refresh_dropbox(cred)
+
+    def test_credential_refresh_integration(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test OAuthCredential.refresh() uses handler correctly."""
         # Create credential with mocked handler
         mock_handler = Mock(return_value={'access_token': 'new_token', 'expires_in': 3600})
 
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='old_token',
-            refresh_token='refresh',
-            expires_at=datetime.now(UTC) - timedelta(hours=1),
-            handler=mock_handler,
-        )
+        cred = replace(dropbox_credential, handler=mock_handler)
 
         # Call refresh
         refreshed = cred.refresh()
@@ -198,19 +204,12 @@ class TestTokenRefresh:
         assert refreshed.expires_at is not None
         assert refreshed.expires_at > datetime.now(UTC)
 
-    def test_refresh_without_handler_raises_error(self):
+    def test_refresh_without_handler_raises_error(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test that refresh without handler raises ValueError."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token',
-            refresh_token='refresh',
-            handler=None,  # No handler
-        )
+        cred = replace(dropbox_credential, handler=None)
 
         with pytest.raises(ValueError, match='no configuration set'):
             cred.refresh()
@@ -219,16 +218,14 @@ class TestTokenRefresh:
 class TestCredentialUpdate:
     """Test credential update logic."""
 
-    def test_update_from_refresh_with_expires_in(self):
+    def test_update_from_refresh_with_expires_in(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test updating credential from token data with expires_in."""
-        # Create original credential
-        original = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
+        # Create original credential with old values
+        original = replace(
+            dropbox_credential,
             access_token='old_token',
             refresh_token='old_refresh',
             expires_at=datetime.now(UTC) - timedelta(hours=1),
@@ -254,15 +251,13 @@ class TestCredentialUpdate:
         assert original.access_token == 'old_token'
         assert original.refresh_token == 'old_refresh'
 
-    def test_update_from_refresh_with_expires_at(self):
+    def test_update_from_refresh_with_expires_at(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test updating credential with expires_at timestamp."""
-        original = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
+        original = replace(
+            dropbox_credential,
             access_token='old_token',
             refresh_token='refresh',
         )
@@ -278,18 +273,12 @@ class TestCredentialUpdate:
         assert updated.access_token == 'new_token'
         assert updated.expires_at == future_time
 
-    def test_update_preserves_unchanged_fields(self):
+    def test_update_preserves_unchanged_fields(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test that fields not in token data are preserved."""
-        original = OAuthCredential(
-            type='dropbox',
-            account='original_account',
-            client_id='original_client',
-            client_secret='original_secret',
-            token_type='bearer',
-            scope='files.content.write',
-            access_token='old_token',
-            refresh_token='original_refresh',
-        )
+        original = dropbox_credential
 
         # Update with minimal data (only access_token)
         token_data = {
@@ -300,27 +289,21 @@ class TestCredentialUpdate:
         updated = original.update_from_refresh(token_data)
 
         # Assert updated field changed
-        assert updated.access_token == 'new_token'
+        assert updated.access_token == token_data['access_token']
 
         # Assert other fields preserved
-        assert updated.account == 'original_account'
-        assert updated.client_id == 'original_client'
-        assert updated.client_secret == 'original_secret'
-        assert updated.scope == 'files.content.write'
-        assert updated.refresh_token == 'original_refresh'
+        assert updated.account == original.account
+        assert updated.client_id == original.client_id
+        assert updated.client_secret == original.client_secret
+        assert updated.scope == original.scope
+        assert updated.refresh_token == original.refresh_token
 
-    def test_update_with_partial_data(self):
+    def test_update_with_partial_data(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test update with only some fields in token response."""
-        original = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read',
-            access_token='old_token',
-            refresh_token='refresh',
-        )
+        original = dropbox_credential
 
         # Outlook might return scope in refresh response
         token_data = {
@@ -331,22 +314,16 @@ class TestCredentialUpdate:
 
         updated = original.update_from_refresh(token_data)
 
-        assert updated.access_token == 'new_token'
-        assert updated.scope == 'Mail.Read Mail.Send'
-        assert updated.refresh_token == 'refresh'  # Unchanged
+        assert updated.access_token == token_data['access_token']
+        assert updated.scope == token_data['scope']
+        assert updated.refresh_token == original.refresh_token
 
-    def test_update_immutability(self):
+    def test_update_immutability(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test that update_from_refresh follows immutable pattern."""
-        original = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token1',
-            refresh_token='refresh',
-        )
+        original = replace(dropbox_credential, access_token='token1')
 
         # Multiple updates should create new instances
         updated1 = original.update_from_refresh({'access_token': 'token2', 'expires_in': 3600})
@@ -366,19 +343,13 @@ class TestCredentialUpdate:
 class TestDropboxManager:
     """Test DropboxManager client creation and lifecycle."""
 
-    def test_client_created_lazily(self):
+    def test_client_created_lazily(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test client is created only when accessed."""
         # Create credential
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='test_client_id',
-            client_secret='test_client_secret',
-            token_type='bearer',
-            scope='files.content.write',
-            access_token='test_access_token',
-            refresh_token='test_refresh_token',
-        )
+        cred = dropbox_credential
 
         # Create manager
         manager = dropbox_manager_factory(cred)
@@ -395,7 +366,7 @@ class TestDropboxManager:
 
             # Assert Dropbox constructor called with correct params
             MockDropbox.assert_called_once_with(
-                oauth2_access_token='test_access_token',
+                oauth2_access_token='old_access_token',  # Matches fixture value
                 oauth2_refresh_token='test_refresh_token',
                 app_key='test_client_id',
                 app_secret='test_client_secret',
@@ -405,18 +376,12 @@ class TestDropboxManager:
             assert manager._client is mock_client
             assert client is mock_client
 
-    def test_client_reused_on_subsequent_access(self):
+    def test_client_reused_on_subsequent_access(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test client is reused across accesses."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token',
-            refresh_token='refresh',
-        )
+        cred = dropbox_credential
 
         manager = dropbox_manager_factory(cred)
 
@@ -435,18 +400,12 @@ class TestDropboxManager:
             assert client1 is client2
             assert client1 is mock_client
 
-    def test_manager_uses_credential_values(self):
+    def test_manager_uses_credential_values(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test that DropboxManager uses credential's current values."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='original_client_id',
-            client_secret='original_secret',
-            token_type='bearer',
-            scope='files',
-            access_token='original_token',
-            refresh_token='original_refresh',
-        )
+        cred = dropbox_credential
 
         manager = dropbox_manager_factory(cred)
 
@@ -455,41 +414,36 @@ class TestDropboxManager:
 
             # Verify original credential values were used
             call_kwargs = MockDropbox.call_args.kwargs
-            assert call_kwargs['oauth2_access_token'] == 'original_token'
-            assert call_kwargs['oauth2_refresh_token'] == 'original_refresh'
-            assert call_kwargs['app_key'] == 'original_client_id'
-            assert call_kwargs['app_secret'] == 'original_secret'
+            assert call_kwargs['oauth2_access_token'] == cred.access_token
+            assert call_kwargs['oauth2_refresh_token'] == cred.refresh_token
+            assert call_kwargs['app_key'] == cred.client_id
+            assert call_kwargs['app_secret'] == cred.client_secret
 
 
 class TestCredentialSerialization:
     """Test credential serialization (export/load)."""
 
-    def test_export_flat_format(self):
+    def test_export_flat_format(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test credential exports to flat JSON format."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='business',
-            client_id='test_client_id',
-            client_secret='test_client_secret',
-            token_type='bearer',
-            scope='files.content.write',
-            access_token='test_access_token',
-            refresh_token='test_refresh_token',
-            expires_at=datetime(2025, 12, 3, 12, 0, 0, tzinfo=UTC),
-        )
+        cred = dropbox_credential
 
         exported = cred.export()
 
         # Assert flat structure
-        assert exported['type'] == 'dropbox'
-        assert exported['account'] == 'business'
-        assert exported['client_id'] == 'test_client_id'
-        assert exported['client_secret'] == 'test_client_secret'
-        assert exported['token_type'] == 'bearer'
-        assert exported['scope'] == 'files.content.write'
-        assert exported['access_token'] == 'test_access_token'
-        assert exported['refresh_token'] == 'test_refresh_token'
-        assert exported['expires_at'] == '2025-12-03T12:00:00+00:00'
+        assert exported['type'] == cred.type
+        assert exported['account'] == cred.account
+        assert exported['client_id'] == cred.client_id
+        assert exported['client_secret'] == cred.client_secret
+        assert exported['token_type'] == cred.token_type
+        assert exported['scope'] == cred.scope
+        assert exported['access_token'] == cred.access_token
+        assert exported['refresh_token'] == cred.refresh_token
+
+        assert cred.expires_at
+        assert exported['expires_at'] == cred.expires_at.isoformat()
 
         # Assert no nested dicts
         assert 'client' not in exported
@@ -498,19 +452,12 @@ class TestCredentialSerialization:
         # Assert no handler field
         assert 'handler' not in exported
 
-    def test_export_without_expires_at(self):
+    def test_export_without_expires_at(
+        self,
+        dropbox_credential: OAuthCredential[DropboxManager],
+    ):
         """Test export handles missing expires_at."""
-        cred = OAuthCredential(
-            type='dropbox',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='files',
-            access_token='token',
-            refresh_token='refresh',
-            expires_at=None,  # No expiration
-        )
+        cred = replace(dropbox_credential, expires_at=None)
 
         exported = cred.export()
 
@@ -576,23 +523,22 @@ class TestCredentialManager:
         with creds_file.open('wb') as f:
             f.write(orjson.dumps(test_data))
 
-        manager = CredentialManager(creds_file)
+        # Mock Dropbox client
+        mock_dbx = Mock()
+        mock_dbx._oauth2_access_token = 'new_token'
+        mock_dbx._oauth2_refresh_token = 'refresh'
+        mock_dbx._oauth2_access_token_expiration = datetime.now(UTC) + timedelta(hours=4)
+        mock_dbx._scope = ['files']
+        mock_dbx.check_and_refresh_access_token.return_value = None
 
-        # Mock requests.post for token refresh
-        with patch('requests.post') as mock_post:
-            mock_response = Mock()
-            mock_response.json.return_value = {
-                'access_token': 'new_token',
-                'expires_in': 3600,
-            }
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
+        with patch('dropbox.Dropbox', return_value=mock_dbx):
+            manager = CredentialManager(creds_file)
 
             # Get credential (should trigger refresh)
             cred = manager.get_credential('dropbox')
 
             # Assert refresh was called
-            assert mock_post.called
+            mock_dbx.check_and_refresh_access_token.assert_called_once()
             assert cred.access_token == 'new_token'
 
     def test_get_credential_no_refresh_when_valid(self, tempdir: Path):
@@ -647,17 +593,16 @@ class TestCredentialManager:
         with creds_file.open('wb') as f:
             f.write(orjson.dumps(test_data))
 
-        manager = CredentialManager(creds_file)
+        with patch('dropbox.Dropbox'):
+            manager = CredentialManager(creds_file)
 
-        # Simulate token refresh by manually updating credential
-        from dataclasses import replace
+            # Simulate token refresh by manually updating credential
+            cred = manager._credentials['dropbox']
+            updated_cred = replace(cred, access_token='new_token')
+            manager._credentials['dropbox'] = updated_cred
 
-        cred = manager._credentials['dropbox']
-        updated_cred = replace(cred, access_token='new_token')
-        manager._credentials['dropbox'] = updated_cred
-
-        # Persist changes
-        manager.persist()
+            # Persist changes
+            manager.persist()
 
         # Reload and verify flat format
         with creds_file.open('rb') as f:
@@ -708,11 +653,19 @@ class TestMSALIntegration:
             f.write(orjson.dumps(test_data))
 
         # Load credentials
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with (
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL,
+            patch('dropbox.Dropbox'),
+        ):
             mock_app = Mock()
             MockMSAL.return_value = mock_app
 
             manager = CredentialManager(creds_file)
+
+            outlook_cred = manager['microsoft-outlook']
+
+            # Access manager.client to trigger lazy creation
+            _ = outlook_cred.manager.client
 
             # Assert MSAL app created for Outlook
             MockMSAL.assert_called_once_with(
@@ -721,12 +674,11 @@ class TestMSALIntegration:
                 authority='https://login.microsoftonline.com/common',
             )
 
-            outlook_cred = manager._credentials['microsoft-outlook']
-            assert outlook_cred.msal_app is mock_app
+            assert outlook_cred.manager.client is mock_app
 
             # Assert Dropbox credential has no MSAL app
-            dropbox_cred = manager._credentials['dropbox']
-            assert dropbox_cred.msal_app is None
+            dropbox_cred = manager['dropbox']
+            assert dropbox_cred.manager.client is not mock_app
 
     def test_msal_migration_first_refresh(self, tempdir: Path):
         """Test migration flag changes after first refresh."""
@@ -759,8 +711,9 @@ class TestMSALIntegration:
             'expires_in': 3600,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
+            mock_app.get_accounts.return_value = []
             mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
             MockMSAL.return_value = mock_app
 
@@ -770,7 +723,7 @@ class TestMSALIntegration:
             cred = manager.get_credential('microsoft-outlook')
 
             # Assert migration flag set to True
-            assert cred.msal_migrated is True
+            assert cred['msal_migrated'] is True
 
             # Assert persisted with flag
             with creds_file.open('rb') as f:
@@ -808,7 +761,7 @@ class TestMSALIntegration:
             'expires_in': 3600,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
             mock_app.get_accounts.return_value = [mock_account]
             mock_app.acquire_token_silent.return_value = mock_msal_result
@@ -817,27 +770,20 @@ class TestMSALIntegration:
             manager = CredentialManager(creds_file)
 
             # Manually set credential as expired to trigger refresh
-            cred = manager._credentials['microsoft-outlook']
-            cred = manager.get_credential('microsoft-outlook')
+            _ = manager._credentials['microsoft-outlook']
+            _ = manager.get_credential('microsoft-outlook')
 
             # Assert silent refresh called (not by_refresh_token)
             mock_app.acquire_token_silent.assert_called_once()
             mock_app.acquire_token_by_refresh_token.assert_not_called()
 
-    def test_msal_fallback_on_silent_failure(self):
+    def test_msal_fallback_on_silent_failure(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test fallback to refresh token when silent fails."""
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='token',
-            refresh_token='refresh',
-            handler=_refresh_outlook_msal,
-            msal_migrated=True,
-        )
+        microsoft_credential.extra_properties['msal_migrated'] = True
+        cred = microsoft_credential
 
         mock_account = {'username': 'user@example.com'}
         mock_msal_success = {
@@ -847,7 +793,7 @@ class TestMSALIntegration:
             'expires_in': 3600,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
             mock_app.get_accounts.return_value = [mock_account]
             mock_app.acquire_token_silent.return_value = None  # Silent fails
@@ -861,20 +807,14 @@ class TestMSALIntegration:
             mock_app.acquire_token_by_refresh_token.assert_called_once()
             assert result['access_token'] == 'new_token'
 
-    def test_msal_handles_account_cache_miss(self):
+    def test_msal_handles_account_cache_miss(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test fallback when account cache is empty."""
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='token',
-            refresh_token='refresh',
-            handler=_refresh_outlook_msal,
-            msal_migrated=True,
-        )
+        # Set msal_migrated to True so get_accounts is called
+        cred = microsoft_credential
+        cred.extra_properties['msal_migrated'] = True
 
         mock_msal_result = {
             'access_token': 'new_token',
@@ -883,12 +823,17 @@ class TestMSALIntegration:
             'expires_in': 3600,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
-            mock_app = Mock()
-            mock_app.get_accounts.return_value = []  # Empty cache
-            mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
-            MockMSAL.return_value = mock_app
+        # Mock MSAL app
+        mock_app = Mock()
+        mock_app.get_accounts.return_value = []  # Empty cache
+        mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
 
+        # Create mock manager with MSAL client
+        mock_manager = Mock()
+        mock_manager.client = mock_app
+
+        # Patch the manager property
+        with patch.object(type(cred), 'manager', property(lambda _: mock_manager)):
             result = _refresh_outlook_msal(cred)
 
             # Assert acquire_token_by_refresh_token used directly
@@ -896,45 +841,31 @@ class TestMSALIntegration:
             mock_app.acquire_token_by_refresh_token.assert_called_once()
             assert result['access_token'] == 'new_token'
 
-    def test_msal_error_handling(self):
+    def test_msal_error_handling(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test MSAL error handling."""
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='token',
-            refresh_token='invalid_refresh',
-            handler=_refresh_outlook_msal,
-            msal_migrated=False,
-        )
+        cred = microsoft_credential
 
         mock_error_result = {'error': 'invalid_grant', 'error_description': 'Refresh token expired'}
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
             mock_app.acquire_token_by_refresh_token.return_value = mock_error_result
             MockMSAL.return_value = mock_app
 
-            with pytest.raises(RuntimeError, match='MSAL token refresh failed: Refresh token expired'):
+            with pytest.raises(
+                RuntimeError, match='MSAL token refresh failed: Refresh token expired'
+            ):
                 _refresh_outlook_msal(cred)
 
-    def test_msal_token_normalization(self):
+    def test_msal_token_normalization(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test MSAL result converted to compatible format."""
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='token',
-            refresh_token='refresh',
-            handler=_refresh_outlook_msal,
-            msal_migrated=False,
-        )
+        cred = microsoft_credential
 
         # MSAL returns scope as list, not string
         mock_msal_result = {
@@ -945,7 +876,7 @@ class TestMSALIntegration:
             'expires_in': 7200,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
             mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
             MockMSAL.return_value = mock_app
@@ -959,25 +890,15 @@ class TestMSALIntegration:
             assert result['scope'] == 'Mail.Read offline_access Mail.Send'  # String, not list
             assert result['expires_in'] == 7200
 
-    def test_msal_app_not_serialized(self):
+    def test_msal_app_not_serialized(
+        self,
+        microsoft_credential: OAuthCredential[MicrosoftAuthManager],
+    ):
         """Test msal_app excluded from export."""
-        cred = OAuthCredential(
-            type='microsoft-outlook',
-            account='test',
-            client_id='client',
-            client_secret='secret',
-            token_type='bearer',
-            scope='Mail.Read offline_access',
-            access_token='token',
-            refresh_token='refresh',
-            msal_app=Mock(),  # Mock MSAL app
-            msal_migrated=True,
-        )
+        cred = microsoft_credential
+        cred.extra_properties['msal_migrated'] = True
 
         exported = cred.export()
-
-        # Assert msal_app excluded
-        assert 'msal_app' not in exported
 
         # Assert msal_migrated included
         assert 'msal_migrated' in exported
@@ -1003,28 +924,33 @@ class TestMSALIntegration:
         with creds_file.open('wb') as f:
             f.write(orjson.dumps(test_data))
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app1 = Mock()
-            MockMSAL.return_value = mock_app1
+            mock_app2 = Mock()
+            # Use side_effect to return different mocks for each call
+            MockMSAL.side_effect = [mock_app1, mock_app2]
 
             # First load
             manager1 = CredentialManager(creds_file)
             cred1 = manager1._credentials['microsoft-outlook']
 
+            # Access client to trigger creation
+            client1 = cred1.manager.client
+
             # Persist (should not serialize msal_app)
             manager1.persist()
 
             # Second load
-            mock_app2 = Mock()
-            MockMSAL.return_value = mock_app2
-
             manager2 = CredentialManager(creds_file)
             cred2 = manager2._credentials['microsoft-outlook']
 
-            # Assert new MSAL app instance created
-            assert cred1.msal_app is mock_app1
-            assert cred2.msal_app is mock_app2
-            assert cred1.msal_app is not cred2.msal_app
+            # Access client to trigger creation
+            client2 = cred2.manager.client
+
+            # Assert new MSAL app instance created for each load
+            assert client1 is mock_app1
+            assert client2 is mock_app2
+            assert client1 is not client2
 
     def test_msal_migration_idempotent(self, tempdir: Path):
         """Test migration flag stays True after multiple refreshes."""
@@ -1055,7 +981,7 @@ class TestMSALIntegration:
             'expires_in': 3600,
         }
 
-        with patch('msal.ConfidentialClientApplication') as MockMSAL:
+        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
             mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
             mock_app.get_accounts.return_value = [mock_account]
@@ -1066,18 +992,24 @@ class TestMSALIntegration:
 
             # First refresh (migration)
             cred1 = manager.get_credential('microsoft-outlook')
-            assert cred1.msal_migrated is True
+            assert cred1['msal_migrated'] is True
 
-            # Force second refresh by marking as expired
-            from dataclasses import replace
+            # Force second refresh by manually updating the credential expiry
+            cred1_dict = cred1.export()
+            cred1_dict['expires_at'] = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
 
-            manager._credentials['microsoft-outlook'] = replace(
-                cred1, expires_at=datetime.now(UTC) - timedelta(hours=1)
-            )
+            # Reload from JSON to get expired credential with same structure
+            from automate.eserv.util.oauth_manager import _parse_credential_json
+
+            with patch(
+                'automate.eserv.util.msal_manager.ConfidentialClientApplication',
+                return_value=mock_app,
+            ):
+                manager._credentials['microsoft-outlook'] = _parse_credential_json(cred1_dict)
 
             # Second refresh (normal mode)
             cred2 = manager.get_credential('microsoft-outlook')
-            assert cred2.msal_migrated is True  # Still True
+            assert cred2['msal_migrated'] is True  # Still True
 
     def test_dual_mode_dropbox_unaffected(self, tempdir: Path):
         """Test Dropbox credentials unaffected by MSAL integration."""
@@ -1110,47 +1042,47 @@ class TestMSALIntegration:
         with creds_file.open('wb') as f:
             f.write(orjson.dumps(test_data))
 
-        # Mock Dropbox refresh
-        dropbox_response = {'access_token': 'new_dbx_token', 'token_type': 'bearer', 'expires_in': 3600}
+        # Mock Dropbox client
+        mock_dbx = Mock()
+        mock_dbx._oauth2_access_token = 'new_dbx_token'
+        mock_dbx._oauth2_refresh_token = 'refresh'
+        mock_dbx._oauth2_access_token_expiration = datetime.now(UTC) + timedelta(hours=4)
+        mock_dbx._scope = ['files.content.write']
+        mock_dbx.check_and_refresh_access_token.return_value = None
 
-        # Mock MSAL refresh
+        # Mock MSAL app
+        mock_msal_app = Mock()
         msal_result = {
             'access_token': 'new_outlook_token',
             'token_type': 'bearer',
             'scope': ['Mail.Read', 'offline_access'],
             'expires_in': 3600,
         }
+        mock_msal_app.get_accounts.return_value = []
+        mock_msal_app.acquire_token_by_refresh_token.return_value = msal_result
 
         with (
-            patch('requests.post') as mock_post,
-            patch('msal.ConfidentialClientApplication') as MockMSAL,
+            patch('dropbox.Dropbox', return_value=mock_dbx),
+            patch(
+                'automate.eserv.util.msal_manager.ConfidentialClientApplication',
+                return_value=mock_msal_app,
+            ),
         ):
-            # Setup mocks
-            mock_response = Mock()
-            mock_response.json.return_value = dropbox_response
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
-
-            mock_app = Mock()
-            mock_app.acquire_token_by_refresh_token.return_value = msal_result
-            MockMSAL.return_value = mock_app
-
             manager = CredentialManager(creds_file)
 
             # Refresh Dropbox credential
             dbx_cred = manager.get_credential('dropbox')
 
-            # Assert Dropbox uses requests.post (not MSAL)
-            mock_post.assert_called_once()
-            assert dbx_cred.msal_app is None
-            assert dbx_cred.msal_migrated is False  # Default value
+            # Assert Dropbox uses SDK refresh (not MSAL)
+            mock_dbx.check_and_refresh_access_token.assert_called_once()
+            assert dbx_cred['msal_migrated'] is None  # Default value
             assert dbx_cred.access_token == 'new_dbx_token'
 
             # Refresh Outlook credential
             outlook_cred = manager.get_credential('microsoft-outlook')
 
             # Assert Outlook uses MSAL
-            mock_app.acquire_token_by_refresh_token.assert_called_once()
-            assert outlook_cred.msal_app is not None
-            assert outlook_cred.msal_migrated is True
+            mock_msal_app.acquire_token_by_refresh_token.assert_called_once()
+            assert outlook_cred.manager.client is not None
+            assert outlook_cred['msal_migrated'] is True
             assert outlook_cred.access_token == 'new_outlook_token'

@@ -48,12 +48,14 @@ if typing.TYPE_CHECKING:
     @type_check_only
     class CredentialsJSON(TypedDict):
         type: CredentialType
-        account: NotRequired[str]
+        account: NotRequired[str | None]
+        authority: NotRequired[str | None]
         client_id: str
         client_secret: str
         token_type: str
         scope: str
         access_token: str
         refresh_token: str
-        expires_at: NotRequired[str]
-        expires_in: NotRequired[int]
+        issued_at: NotRequired[str | None]
+        expires_at: NotRequired[str | None]
+        expires_in: NotRequired[int | None]

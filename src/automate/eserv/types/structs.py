@@ -1,11 +1,11 @@
 __all__ = ['DownloadInfo', 'EmailInfo', 'EmailRecord', 'PartialEmailRecord', 'UploadInfo']
 
 from dataclasses import asdict, astuple, dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from datetime import datetime
+    from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)

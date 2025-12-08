@@ -20,18 +20,15 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from dotenv import load_dotenv
 from rampy import console
 
 from automate.eserv.errors.types import InvalidFormatError, MissingVariableError
 from automate.eserv.util.oauth_manager import CredentialManager
-
-if TYPE_CHECKING:
-    from automate.eserv.types import CredentialType, OAuthCredential
 
 
 @dataclass(slots=True, frozen=True)
@@ -106,34 +103,6 @@ class SMTPConfig:
             password=password,
             use_tls=use_tls,
         )
-
-
-def _credential_manager_factory() -> CredentialManager:
-    if not Config.dotenv_loaded:
-        message = 'Credential manager instantiation occurred before dotenv file was loaded.'
-        raise RuntimeError(message)
-
-    if not (string := os.getenv('CREDENTIALS_PATH')):
-        raise MissingVariableError(name='CREDENTIALS_PATH')
-
-    return CredentialManager(Path(string).resolve(strict=True))
-
-
-@dataclass(slots=True, frozen=True)
-class CredentialConfig:
-    """API authorization configuration (OAuth2).
-
-    Attributes:
-        credential (OAuthCredential):
-            The credential used for authorization for this API.
-
-    """
-
-    manager: CredentialManager = field(init=False, default_factory=_credential_manager_factory)
-
-    def __getitem__(self, name: CredentialType) -> OAuthCredential:
-        """Retrieve the named authorization credential, storing the value if not found in cache."""
-        return self.manager.get_credential(name)
 
 
 @dataclass(slots=True, frozen=True)
@@ -284,7 +253,7 @@ class Config:
         cls.dotenv_path = None if not dotenv else dotenv.resolve(strict=True)
         cls.dotenv_loaded = load_dotenv(cls.dotenv_path, **kwds)
 
-    credentials: CredentialConfig = field(init=False, default_factory=CredentialConfig)
+    credentials: CredentialManager
 
     smtp: SMTPConfig
     paths: PathsConfig
@@ -312,7 +281,13 @@ def config_factory(dotenv: Path | None = None) -> Config:
     # When a specific dotenv path is provided (e.g., for testing), override existing env vars
     Config.load(dotenv, override=dotenv is not None)
 
+    if not (cred_path := os.getenv('CREDENTIALS_PATH')):
+        raise MissingVariableError(name='CREDENTIALS_PATH')
+
+    cred_path = Path(cred_path).resolve(strict=True)
+
     return Config(
+        credentials=CredentialManager(cred_path),
         smtp=SMTPConfig.from_env(),
         monitoring=MonitoringConfig.from_env(),
         paths=(paths := PathsConfig.from_env()),

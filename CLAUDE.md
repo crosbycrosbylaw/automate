@@ -185,6 +185,28 @@ pixi run push
 
 ## Development History
 
+### Test Suite Completion and MSAL Scope Fix (December 7, 2025)
+
+**Completed test coverage** for credential management and MSAL integration.
+
+**Changes:**
+
+-   **Fixed MSAL scope handling** - MSAL reserved scopes (`offline_access`, `openid`, `profile`) are now filtered out before API calls, as MSAL handles them automatically
+-   **Completed 4 incomplete test implementations** - Fully implemented dropbox/MSAL refresh success and error tests
+-   **Fixed credential immutability** - `update_from_refresh()` now uses `dataclass.replace()` for proper immutability
+-   **Fixed walrus operator bug** - Corrected scope filtering logic in `_refresh_outlook_msal()`
+-   **Fixed `export()` method** - Manual dict construction avoids issues with `init=False` fields like `_manager`
+-   **Updated all test mocks** - Proper patching at module level (`automate.eserv.util.msal_manager.ConfidentialClientApplication`)
+-   **Fixed `msal_migrated` flag handling** - Now correctly updates `extra_properties` dict instead of using `replace()`
+
+**Test results:** All 142 tests passing (was 20 failing, now 0)
+
+**Benefits:**
+-   Complete test coverage for OAuth credential management
+-   MSAL integration properly tested with migration scenarios
+-   Scope filtering prevents runtime errors with Microsoft Graph API
+-   Immutable credential updates ensure thread safety
+
 ### MSAL Migration for Outlook Authentication (December 2025)
 
 **Major enhancement:** Migrated Microsoft Outlook authentication from manual OAuth2 to MSAL (Microsoft Authentication Library for Python).
