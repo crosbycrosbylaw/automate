@@ -74,7 +74,7 @@ class DropboxManager(TokenManager[Dropbox]):
         }
 
     @property
-    def client(self):
+    def client(self) -> Dropbox:
         """Lazily create Dropbox client from credential.
 
         Returns:

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import new_class
-from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from azure.core.credentials import AccessToken, TokenCredential
 from msal import ConfidentialClientApplication
@@ -15,7 +15,7 @@ from automate.eserv.types.structs import TokenManager
 from setup_console import console
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    pass
 
 
 def _build_client_credential() -> dict[str, str]:
@@ -62,7 +62,17 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
 
         return self._client_cred
 
-    def _authenticate_with_certificate(self) -> AccessToken:
+    def _authenticate_with_certificate(self) -> dict[str, Any]:
+        """Authenticate using certificate and return token data.
+
+        Returns:
+            Token data dict with access_token, expires_in, etc.
+
+        Raises:
+            FileNotFoundError: If certificate file not found
+            Exception: If certificate authentication fails
+
+        """
         try:
             app = ConfidentialClientApplication(
                 client_id=self.credential.client_id,
@@ -105,22 +115,39 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             seconds = int(result.pop('expires_in', 3600))
             result['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
 
-            self.credential = self.credential.update_from_refresh(result)
-            return self.credential.token
+            # Return token data instead of mutating credential
+            # Let caller handle update via update_from_refresh()
+            return result
 
-    def _verify_token_data(
+    def _validate_token_data(
         self,
         token_data: object,
         errors: bool = True,
-    ) -> TypeGuard[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
+        """Validate token data and handle errors.
+
+        Args:
+            token_data: Raw token response from MSAL
+            errors: If True, raise exception on error; if False, return None on error
+
+        Returns:
+            Validated token data dict, or None if errors=False and data is invalid
+
+        Raises:
+            TypeError: If token_data is not a dict
+            DynamicException: If token_data contains error (when errors=True)
+
+        """
         if not isinstance(token_data, dict):
-            return False
+            if errors:
+                raise TypeError(f'Expected dict, got {type(token_data).__name__}')
+            return None
 
         if errors is False:
-            return 'error' not in token_data
+            return None if 'error' in token_data else token_data
 
         if 'error' not in token_data:
-            return True
+            return token_data
 
         error_name: str = token_data.pop('error', 'Error')
 
@@ -167,18 +194,17 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
                 account=None if not (accounts := self.client.get_accounts()) else accounts[0],
             )
 
-        if not self._verify_token_data(token_data, errors=False):
+        if not self._validate_token_data(token_data, errors=False):
             token_data = self.client.acquire_token_by_refresh_token(
                 refresh_token=self.credential.refresh_token,
                 scopes=self.scopes,
             )
 
         try:
-            self._verify_token_data(token_data, errors=True)
+            token_data = self._validate_token_data(token_data, errors=True)
         except Exception:
             console.exception('Refresh token authentication failed; attempting certificate auth.')
-            self._authenticate_with_certificate()
-            return {}  # inner auth method handles update
+            return self._authenticate_with_certificate()
 
         self.credential.extra_properties.update(
             id_token=token_data.get('id_token'),
@@ -212,23 +238,25 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
 
         return AccessToken(str(self.credential), int(exp.timestamp()))
 
-    def iter_scopes(self) -> Generator[str]:
-        yield from (x for x in self.credential.scope.split() if x not in self._RESERVED_SCOPES)
-
     @property
     def app_uri(self) -> str:
         return f'api://{self.credential.client_id}'
 
     @property
     def scopes(self) -> list[str]:
-        return [*self.iter_scopes()]
+        """Return scope list with reserved scopes filtered out."""
+        return [
+            scope
+            for scope in self.credential.scope.split()
+            if scope not in self._RESERVED_SCOPES
+        ]
 
     @property
-    def client(self):
-        """Lazily create Dropbox client from credential.
+    def client(self) -> ConfidentialClientApplication:
+        """Lazily create MSAL confidential client application.
 
         Returns:
-            Dropbox client instance.
+            ConfidentialClientApplication instance.
 
         """
         if self._client is None:

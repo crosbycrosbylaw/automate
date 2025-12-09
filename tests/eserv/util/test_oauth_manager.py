@@ -19,14 +19,6 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
-def _refresh_outlook_msal(cred: OAuthCredential[MicrosoftAuthManager]) -> dict[str, Any]:
-    return msauth_manager_factory(cred)._refresh_token()
-
-
-def _refresh_dropbox(cred: OAuthCredential[DropboxManager]) -> dict[str, Any]:
-    return dropbox_manager_factory(cred)._refresh_token()
-
-
 @pytest.fixture
 def dropbox_credential():
     return OAuthCredential(
@@ -1087,3 +1079,167 @@ class TestMSALIntegration:
             assert outlook_cred.manager.client is not None
             assert outlook_cred['msal_migrated'] is True
             assert outlook_cred.access_token == 'new_outlook_token'
+
+
+class TestCertificateAuthentication:
+    """Test certificate-based authentication fallback."""
+
+    def test_certificate_auth_returns_token_data(self, microsoft_credential):
+        """Certificate auth should return token data dict, not mutate credential."""
+        manager = msauth_manager_factory(microsoft_credential)
+
+        with patch.object(manager.client, 'acquire_token_for_client') as mock_acquire:
+            mock_acquire.return_value = {
+                'access_token': 'cert_token',
+                'expires_in': 3600,
+                'token_type': 'Bearer',
+            }
+
+            token_data = manager._authenticate_with_certificate()
+
+            assert token_data['access_token'] == 'cert_token'
+            assert token_data['expires_in'] == 3600
+            # Credential should NOT be mutated
+            assert manager.credential.access_token == 'old_outlook_token'
+
+    def test_certificate_auth_fallback_on_refresh_failure(self, microsoft_credential):
+        """Refresh token failure should trigger certificate auth."""
+        manager = msauth_manager_factory(microsoft_credential)
+
+        with patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt, \
+             patch.object(manager.client, 'acquire_token_for_client') as mock_cert:
+            mock_rt.return_value = {'error': 'invalid_grant', 'error_description': 'Bad token'}
+            mock_cert.return_value = {'access_token': 'cert_token', 'expires_in': 3600}
+
+            token_data = manager._refresh_token()
+
+            assert token_data['access_token'] == 'cert_token'
+            mock_cert.assert_called_once()
+
+    def test_certificate_auth_updates_via_refresh_chain(self, microsoft_credential):
+        """Certificate auth token should flow through refresh() → update_from_refresh()."""
+        manager = msauth_manager_factory(microsoft_credential)
+
+        with patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt, \
+             patch.object(manager.client, 'acquire_token_for_client') as mock_cert, \
+             patch.object(manager, '_authenticate_with_certificate') as mock_cert_auth:
+            mock_rt.return_value = {'error': 'invalid_grant', 'error_description': 'Bad token'}
+            mock_cert_auth.return_value = {'access_token': 'cert_token', 'expires_in': 3600}
+
+            refreshed_cred = microsoft_credential.refresh()
+
+            assert refreshed_cred.access_token == 'cert_token'
+            # Original credential unchanged (immutability)
+            assert microsoft_credential.access_token == 'old_outlook_token'
+            mock_cert_auth.assert_called_once()
+
+
+class TestProtocolCompliance:
+    """Test that managers implement TokenManager protocol."""
+
+    def test_dropbox_manager_implements_token_manager(self, dropbox_credential):
+        """DropboxManager should implement TokenManager protocol."""
+        from automate.eserv.types.structs import TokenManager
+
+        manager = dropbox_manager_factory(dropbox_credential)
+
+        assert isinstance(manager, TokenManager)
+        assert hasattr(manager, 'credential')
+        assert hasattr(manager, '_client')
+        assert hasattr(manager, '_refresh_token')
+        assert hasattr(manager, 'client')
+
+    def test_microsoft_auth_manager_implements_token_manager(self, microsoft_credential):
+        """MicrosoftAuthManager should implement TokenManager protocol."""
+        from automate.eserv.types.structs import TokenManager
+
+        manager = msauth_manager_factory(microsoft_credential)
+
+        assert isinstance(manager, TokenManager)
+        assert hasattr(manager, 'credential')
+        assert hasattr(manager, '_client')
+        assert hasattr(manager, '_refresh_token')
+        assert hasattr(manager, 'client')
+
+    def test_token_manager_generic_constraint(self, dropbox_credential):
+        """OAuthCredential should be parameterized by manager type."""
+        manager = dropbox_manager_factory(dropbox_credential)
+
+        # Manager should be bound to credential
+        assert dropbox_credential.manager == manager
+        assert type(manager).__name__ == 'DropboxManager'
+
+
+class TestTokenProperty:
+    """Test OAuthCredential.token property for Azure SDK compatibility."""
+
+    def test_token_property_returns_access_token_object(self, microsoft_credential):
+        """token property should return AccessToken for Azure SDK."""
+        from azure.core.credentials import AccessToken
+
+        token = microsoft_credential.token
+
+        assert isinstance(token, AccessToken)
+        assert token.token == microsoft_credential.access_token
+        assert token.expires_on == int(microsoft_credential.expires_at.timestamp())
+
+    def test_token_property_with_dropbox_credential(self, dropbox_credential):
+        """token property should work with any credential type."""
+        from azure.core.credentials import AccessToken
+
+        token = dropbox_credential.token
+
+        assert isinstance(token, AccessToken)
+        assert token.token == dropbox_credential.access_token
+        assert token.expires_on == int(dropbox_credential.expires_at.timestamp())
+
+
+class TestEdgeCases:
+    """Test edge cases and error paths."""
+
+    def test_validate_token_data_with_non_dict(self, microsoft_credential):
+        """_validate_token_data should raise TypeError for non-dict."""
+        manager = msauth_manager_factory(microsoft_credential)
+
+        with pytest.raises(TypeError, match='Expected dict, got str'):
+            manager._validate_token_data('not a dict')
+
+    def test_validate_token_data_with_error_response(self, microsoft_credential):
+        """_validate_token_data should raise dynamic exception for errors."""
+        manager = msauth_manager_factory(microsoft_credential)
+
+        error_response = {
+            'error': 'invalid_grant',
+            'error_description': 'Token expired',
+        }
+
+        with pytest.raises(Exception, match='invalid_grant'):
+            manager._validate_token_data(error_response)
+
+    def test_scope_filtering_removes_reserved_scopes(self, microsoft_credential):
+        """scopes property should filter reserved MSAL scopes."""
+        cred = replace(
+            microsoft_credential,
+            scope='Mail.Read offline_access openid profile User.Read',
+        )
+        manager = msauth_manager_factory(cred)
+
+        # Should exclude offline_access, openid, profile
+        assert manager.scopes == ['Mail.Read', 'User.Read']
+        assert 'offline_access' not in manager.scopes
+        assert 'openid' not in manager.scopes
+        assert 'profile' not in manager.scopes
+
+    def test_manager_creation_failure_propagates(self, dropbox_credential):
+        """Factory failures should propagate exceptions."""
+        with patch('automate.eserv.util.dbx_manager.DropboxManager.__init__', side_effect=ValueError('Bad config')):
+            with pytest.raises(ValueError, match='Bad config'):
+                dropbox_manager_factory(dropbox_credential)
+
+    def test_refresh_handler_binding(self, dropbox_credential):
+        """Handler should be bound method of manager instance."""
+        manager = dropbox_manager_factory(dropbox_credential)
+
+        # Handler should be manager._refresh_token
+        assert dropbox_credential.handler.__self__ == manager
+        assert dropbox_credential.handler.__name__ == '_refresh_token'
