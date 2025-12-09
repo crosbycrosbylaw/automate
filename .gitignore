@@ -79,7 +79,7 @@ service/.cache
 service/.n8n
 service/tmp
 
-credentials.json
+credentials*.json
 
 **/.*cache*
 
@@ -87,3 +87,5 @@ credentials.json
 !ms_flow.ipynb
 
 pixi.lock
+
+cert/

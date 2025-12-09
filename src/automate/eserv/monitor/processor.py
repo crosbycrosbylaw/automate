@@ -33,18 +33,15 @@ class EmailProcessor:
         """Initialize state from pipeline after dataclass initialization."""
         from .client import GraphClient
 
-        self.client = GraphClient(
-            self.pipeline.config.credentials['microsoft-outlook'],
-            self.pipeline.config.monitoring,
-        )
+        self.client = GraphClient(self.pipeline.config)
         self.state = self.pipeline.state
 
-    def process_batch(self, num_days: int) -> BatchResult:
+    async def process_batch(self, num_days: int) -> BatchResult:
         """Process all unprocessed emails from monitoring folder."""
         from automate.eserv.types import BatchResult
 
         try:
-            batch = self.client.fetch_unprocessed_emails(num_days, self.state.processed)
+            batch = await self.client.fetch_unprocessed_emails(num_days, self.state.processed)
         except HTTPError as e:
             from automate.eserv import error_factory, result_factory, stage
 
@@ -68,7 +65,7 @@ class EmailProcessor:
             # Apply flag (auto-retry on transient failure)
             try:
                 flag = self._result_to_flag(result)
-                self.client.apply_flag(record.uid, flag)
+                await self.client.apply_flag(record.uid, flag)
             except Exception:
                 console.exception('Batch processing')
 

@@ -1,11 +1,14 @@
 """Provides a high-level interface for automating file-stamped document uploads."""
 
+# ruff: noqa: RUF013
+# pyright: reportArgumentType=false
+
 
 def process(
     body,
-    dotenv: str | None = None,
-    uid: str | None = None,
-    received: str | None = None,
+    dotenv: str = None,
+    uid: str = None,
+    received: str = None,
     subject: str = '',
     sender: str = 'unknown',
 ):
@@ -41,7 +44,7 @@ def process(
 
     dotenv_path = None
 
-    if dotenv is not None:
+    if dotenv:
         from pathlib import Path
 
         dotenv_path = Path(dotenv)
@@ -53,7 +56,7 @@ def process(
         'received_at': None,
     }
 
-    if received is not None:
+    if received:
         from datetime import datetime
 
         kwds['received_at'] = datetime.fromisoformat(received)
@@ -61,11 +64,11 @@ def process(
     setup_eserv(dotenv_path).execute(record_factory(body, **kwds))
 
 
-def monitor(dotenv: str | None = None, lookback: int = 1):
+async def monitor(dotenv: str = None, lookback: int = 1):
     """Monitor email inbox and process new messages.
 
     Args:
-        dotenv (str | None):
+        dotenv (str):
             Path to a file containing the necessary environment variables.
         lookback (int):
             Process emails from past N days.
@@ -78,9 +81,45 @@ def monitor(dotenv: str | None = None, lookback: int = 1):
 
     dotenv_path = None
 
-    if dotenv is not None:
+    if dotenv:
         from pathlib import Path
 
         dotenv_path = Path(dotenv)
 
-    setup_eserv(dotenv_path).monitor(num_days=lookback)
+    await setup_eserv(dotenv_path).monitor(num_days=lookback)
+
+
+def verify(
+    query: str = None,
+    dotenv: str = None,
+    properties: list[str] = None,
+    insecure: bool = False,
+):
+    """Verify the `Dropbox` and/or `Microsoft Outlook` OAuth2 credential data.
+
+    Args:
+        dotenv (str | None):
+            Path to a file containing the necessary environment variables.
+        query (str | None):
+            A string to filter included credentials by.
+        properties (list[str] | None):
+            A list of properties to include in the output.
+        insecure (bool):
+            Whether to include sensitive information in the console output. \
+                Does nothing if `properties` are provided.
+
+    """
+    from automate.eserv.core import setup_eserv
+
+    dotenv_path = None
+
+    if dotenv:
+        from pathlib import Path
+
+        dotenv_path = Path(dotenv)
+
+    eserv = setup_eserv(dotenv_path)
+
+    for key in 'microsoft-outlook', 'dropbox':
+        if not query or query in key:
+            eserv.config.credentials[key].show(insecure=insecure, properties=properties)

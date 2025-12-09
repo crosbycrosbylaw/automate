@@ -4,24 +4,27 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import orjson
 import pytest
 
 from automate.eserv.util import dropbox_manager_factory, msauth_manager_factory
-from automate.eserv.util.oauth_manager import (
-    CredentialManager,
-    OAuthCredential,
-    _refresh_dropbox,
-    _refresh_outlook_msal,
-)
+from automate.eserv.util.oauth_manager import CredentialManager, OAuthCredential
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from automate.eserv.types import *
+
+
+def _refresh_outlook_msal(cred: OAuthCredential[MicrosoftAuthManager]) -> dict[str, Any]:
+    return msauth_manager_factory(cred)._refresh_token()
+
+
+def _refresh_dropbox(cred: OAuthCredential[DropboxManager]) -> dict[str, Any]:
+    return dropbox_manager_factory(cred)._refresh_token()
 
 
 @pytest.fixture
@@ -37,7 +40,6 @@ def dropbox_credential():
         access_token='old_access_token',
         refresh_token='test_refresh_token',
         expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
-        handler=_refresh_dropbox,
     )
 
 
@@ -54,7 +56,6 @@ def microsoft_credential():
         access_token='old_outlook_token',
         refresh_token='outlook_refresh_token',
         expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
-        handler=_refresh_outlook_msal,
         extra_properties={'msal_migrated': False},
     )
 

@@ -175,7 +175,7 @@ class Pipeline:
 
             return _upload(self.config, context)
 
-    def monitor(self, num_days: int = 1) -> BatchResult:
+    async def monitor(self, num_days: int = 1) -> BatchResult:
         """Monitor email inbox and process new messages.
 
         Args:
@@ -187,7 +187,7 @@ class Pipeline:
         """
         self.tracker.clear_old_errors(days=30)
 
-        batch_result = processor_factory(self).process_batch(num_days)
+        batch_result = await processor_factory(self).process_batch(num_days)
 
         for err in batch_result.summarize().get('error', ()):
             if inner := err.get('error'):

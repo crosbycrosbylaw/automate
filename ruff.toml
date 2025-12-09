@@ -105,7 +105,16 @@ logger-objects     = ["setup_console.console"]
     ignorelist = ['id', 'input']
 
     [lint.per-file-ignores]
-    "**/*.ipynb" = ["ANN", "BLE001", "C401", "D", "F401", "I", "PLW0131"]
+    "**/*.ipynb" = [
+        "ANN",
+        "BLE001",
+        "C401",
+        "D",
+        "F401",
+        "I",
+        "PLW0131",
+        "UP037",
+    ]
     "**/*.pyi" = ["D", "N", "A001", "A002"]
     "**/tests/**" = [
         "PLR",

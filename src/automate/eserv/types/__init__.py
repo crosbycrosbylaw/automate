@@ -40,6 +40,7 @@ __all__ = [
     'RefreshHandler',
     'StatusFlag',
     'TextExtractor',
+    'TokenManager',
     'UploadInfo',
     'UploadStatus',
 ]

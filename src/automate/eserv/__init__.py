@@ -14,6 +14,7 @@ __all__ = [
     'extract_post_request_url',
     'extract_upload_info',
     'folder_matcher_factory',
+    'graph_client_factory',
     'index_cache_factory',
     'msauth_manager_factory',
     'notifier_factory',

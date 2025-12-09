@@ -236,6 +236,12 @@ class Config:
 
     """
 
+    project_root: ClassVar[Path]
+
+    @classmethod
+    def has_root(cls) -> bool:
+        return hasattr(cls, 'project_root')
+
     dotenv_path: ClassVar[Path | None] = None
     dotenv_loaded: ClassVar[bool] = False
 
@@ -252,6 +258,11 @@ class Config:
         """
         cls.dotenv_path = None if not dotenv else dotenv.resolve(strict=True)
         cls.dotenv_loaded = load_dotenv(cls.dotenv_path, **kwds)
+
+        if not (rootpath := os.getenv('PROJECT_ROOT')):
+            raise MissingVariableError(name='CREDENTIALS_PATH')
+
+        cls.project_root = Path(rootpath).resolve(strict=True)
 
     credentials: CredentialManager
 
@@ -281,13 +292,13 @@ def config_factory(dotenv: Path | None = None) -> Config:
     # When a specific dotenv path is provided (e.g., for testing), override existing env vars
     Config.load(dotenv, override=dotenv is not None)
 
-    if not (cred_path := os.getenv('CREDENTIALS_PATH')):
+    if not (credpath := os.getenv('CREDENTIALS_PATH')):
         raise MissingVariableError(name='CREDENTIALS_PATH')
 
-    cred_path = Path(cred_path).resolve(strict=True)
+    credpath = Config.project_root.joinpath(credpath).resolve(strict=True)
 
     return Config(
-        credentials=CredentialManager(cred_path),
+        credentials=CredentialManager(credpath),
         smtp=SMTPConfig.from_env(),
         monitoring=MonitoringConfig.from_env(),
         paths=(paths := PathsConfig.from_env()),

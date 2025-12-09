@@ -3,25 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
+from dropbox import Dropbox
 from dropbox.files import FolderMetadata, WriteMode
 from rampy import create_field_factory
 
+from automate.eserv.types.structs import TokenManager
 from setup_console import console
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
+    from typing import Any
 
-    from dropbox import Dropbox
     from dropbox.files import Metadata
-
-    from automate.eserv.types import OAuthCredential
 
 
 @dataclass(slots=True)
-class DropboxManager:
+class DropboxManager(TokenManager[Dropbox]):
     """Dropbox client wrapper from an OAuth credential.
 
     Attributes:
@@ -29,9 +29,7 @@ class DropboxManager:
 
     """
 
-    credential: OAuthCredential
-    uploaded: list[str] = field(init=False, default_factory=list[Any])
-    _client: Dropbox | None = field(init=False, default=None, repr=False)
+    uploaded: list[str] = field(init=False, default_factory=list[str])
 
     def index(self) -> dict[str, Any]:
         """Return the Dropbox folder index as a dictionary."""
@@ -66,8 +64,17 @@ class DropboxManager:
 
         self.uploaded.append(dropbox_path)
 
+    def _refresh_token(self) -> dict[str, Any]:
+        self.client.check_and_refresh_access_token()
+        return {
+            'access_token': self.client._oauth2_access_token,
+            'expires_at': self.client._oauth2_access_token_expiration,
+            'refresh_token': self.client._oauth2_refresh_token,
+            'scope': ' '.join(str(x) for x in self.client._scope or []),
+        }
+
     @property
-    def client(self) -> Dropbox:
+    def client(self):
         """Lazily create Dropbox client from credential.
 
         Returns:
@@ -83,6 +90,7 @@ class DropboxManager:
                 app_key=self.credential.client_id,
                 app_secret=self.credential.client_secret,
             )
+
         return self._client
 
 

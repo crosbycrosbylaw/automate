@@ -1,6 +1,6 @@
 dependencies.fire             = ">=0.7.1,<0.8"
+dependencies.pytest-asyncio   = ">=1.3.0,<2"
 dependencies.python           = ">=3.14"
-dependencies.pytest-asyncio = ">=1.3.0,<2"
 environments.default.features = ["eserv", "dev"]
 
 [workspace]
@@ -17,7 +17,7 @@ preview   = ["pixi-build"]
 
 automate = { path = ".", editable = true }
 rampy    = { git = "https://github.com/zaynram/ramda-py.git", branch = "master" }
-msgraph-sdk = ">=1.50.0, <2"
+
 
 [tasks]
 automate.cmd = "python -m automate"
@@ -46,6 +46,7 @@ automate.cmd = "python -m automate"
         [feature.eserv.pypi-dependencies]
 
         msal          = ">=1.34.0,<2"
+        msgraph-sdk   = ">=1.50.0"
         pymupdf       = ">=1.26.6"
         python-dotenv = ">=1.0.0,<2"
         structlog     = ">=25.5.0"

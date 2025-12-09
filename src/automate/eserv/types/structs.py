@@ -1,11 +1,20 @@
-__all__ = ['DownloadInfo', 'EmailInfo', 'EmailRecord', 'PartialEmailRecord', 'UploadInfo']
+__all__ = [
+    'DownloadInfo',
+    'EmailInfo',
+    'EmailRecord',
+    'PartialEmailRecord',
+    'TokenManager',
+    'UploadInfo',
+]
 
 from dataclasses import asdict, astuple, dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
+
+    from automate.eserv.util.oauth_manager import OAuthCredential
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +84,16 @@ class DownloadInfo:
         out = asdict(self)
         out['store_path'] = self.store_path.as_posix()
         return out
+
+
+@dataclass
+@runtime_checkable
+class TokenManager[T](Protocol):
+    credential: OAuthCredential[Self]
+
+    def _refresh_token(self) -> dict[str, Any]: ...
+
+    _client: T | None = field(init=False, default=None, repr=False)
+
+    @property
+    def client(self) -> T: ...
