@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal, Self, overload
@@ -11,7 +10,7 @@ from azure.core.credentials import AccessToken
 from rampy.util import create_field_factory
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from automate.eserv.types import DropboxManager, MicrosoftAuthManager
@@ -23,6 +22,11 @@ type RefreshHandler = Callable[[], dict[str, Any]]
 def _parse_expiry(data: CredentialsJSON | dict[str, Any]) -> datetime | None:
     expires_key = next((k for k in data if k.startswith('expires')), '')
     expires_val = data.pop(expires_key, None)
+
+    if not isinstance(expires_val, int | datetime) or (
+        isinstance(expires_val, str) and not all(x in expires_val for x in ('-', 'T', ':', '.'))
+    ):
+        return None
 
     match expires_key:
         case 'expires_in':
@@ -105,6 +109,12 @@ class OAuthCredential[T = Any]:
 
     def __getitem__(self, name: str) -> Any:
         return self.extra_properties[name]
+
+    def __setitem__(self, name: str, value: Any) -> None:
+        self.extra_properties[name] = value
+
+    def __contains__(self, name: str) -> bool:
+        return self.extra_properties.__contains__(name)
 
     def get[D = None](self, name: str, default: D | None = None) -> D:
         return self.extra_properties.get(name, default)

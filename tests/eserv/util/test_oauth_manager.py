@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from unittest.mock import Mock, patch
 
 import orjson
@@ -17,6 +17,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from automate.eserv.types import *
+
+
+def _refresh_dropbox(cred: OAuthCredential[DropboxManager]) -> dict[str, Any]:
+    return cred.manager._refresh_token()
+
+
+def _refresh_outlook_msal(cred: OAuthCredential[MicrosoftAuthManager]) -> dict[str, Any]:
+    return cred.manager._refresh_token()
 
 
 @pytest.fixture
@@ -32,6 +40,19 @@ def dropbox_credential():
         access_token='old_access_token',
         refresh_token='test_refresh_token',
         expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
+    )
+
+
+@pytest.fixture
+def mock_dropbox():
+    return Mock(
+        spec=[
+            '_oauth2_access_token',
+            '_oauth2_refresh_token',
+            '_oauth2_access_token_expiration',
+            '_scope',
+            'check_and_refresh_access_token',
+        ]
     )
 
 
@@ -52,40 +73,75 @@ def microsoft_credential():
     )
 
 
+class TokenManagerClientConfig(TypedDict, total=False):
+    _oauth2_access_token: str
+    _oauth2_refresh_token: str
+    _oauth2_access_token_expiration: datetime
+    _scope: list[str]
+
+    side_effect: Any
+
+
 class TestTokenRefresh:
     """Test unified refresh mechanism for both Dropbox and Outlook."""
+
+    @staticmethod
+    def _refresh_outlook_msal(
+        cred: OAuthCredential[Any],
+    ) -> dict[str, Any]:
+        return cred.manager._refresh_token()
+
+    @staticmethod
+    def _refresh_dropbox(
+        cred: OAuthCredential[Any],
+        **config: Unpack[TokenManagerClientConfig],
+    ) -> None:
+        mock_client = Mock(
+            spec=[
+                '_oauth2_access_token',
+                '_oauth2_refresh_token',
+                '_oauth2_access_token_expiration',
+                '_scope',
+                'check_and_refresh_access_token',
+            ]
+        )
+        mock_client.configure_mock(**{
+            '_oauth2_access_token': config.get('_oauth2_access_token', 'dropbox_token'),
+            '_oauth2_refresh_token': config.get('_oauth2_refresh_token', 'refresh_token'),
+            '_oauth2_access_token_expiration': config.get(
+                '_oauth2_access_token_expiration', datetime.now(UTC) + timedelta(hours=4)
+            ),
+            '_scope': config.get('_scope', ['files.content.write', 'files.metadata.read']),
+            'check_and_refresh_access_token.return_value': None,
+            'check_and_refresh_access_token.side_effect': config.get('side_effect'),
+        })
+
+        mock_manager = Mock()
+        mock_manager.client.return_value = mock_client
+
+        with patch('dropbox.Dropbox', Mock(return_value=mock_client)):
+            result = cred.refresh()
+
+            mock_client.check_and_refresh_access_token.assert_called_once()
+
+            # Assert returned data has correct structure
+            assert result.access_token == mock_client._oauth2_access_token
+            assert result.refresh_token == mock_client._oauth2_refresh_token
+            assert result.expires_at == mock_client._oauth2_access_token_expiration
+            assert result.scope.split() == mock_client._scope
 
     def test_refresh_dropbox_success(
         self,
         dropbox_credential: OAuthCredential[DropboxManager],
     ):
         """Test successful Dropbox token refresh."""
-        cred = dropbox_credential
-
-        # Mock the Dropbox client
-        mock_client = Mock()
-        mock_client._oauth2_access_token = 'new_dropbox_token'
-        mock_client._oauth2_refresh_token = 'new_refresh_token'
-        mock_client._oauth2_access_token_expiration = datetime.now(UTC) + timedelta(hours=4)
-        mock_client._scope = ['files.content.write', 'files.metadata.read']
-        mock_client.check_and_refresh_access_token.return_value = None
-
-        # Create mock manager with client
-        mock_manager = Mock()
-        mock_manager.client = mock_client
-
-        # Patch the manager property
-        with patch.object(type(cred), 'manager', property(lambda _: mock_manager)):
-            result = _refresh_dropbox(cred)
-
-            # Assert handler called the refresh method
-            mock_client.check_and_refresh_access_token.assert_called_once()
-
-            # Assert returned data has correct structure
-            assert result['access_token'] == 'new_dropbox_token'
-            assert result['refresh_token'] == 'new_refresh_token'
-            assert result['expires_at'] == mock_client._oauth2_access_token_expiration
-            assert result['scope'] == 'files.content.write files.metadata.read'
+        self._refresh_dropbox(
+            dropbox_credential,
+            _oauth2_access_token='new_dropbox_token',
+            _oauth2_refresh_token='new_refresh_token',
+            _scope=['files.content.write', 'files.metadata.read'],
+            _oauth2_access_token_expiration=datetime.now(UTC) + timedelta(hours=4),
+        )
 
     def test_refresh_outlook_msal_success(
         self,
@@ -128,53 +184,28 @@ class TestTokenRefresh:
             assert result['scope'] == 'Mail.Read offline_access'
             assert result['expires_in'] == 3600
 
-    def test_refresh_dropbox_network_error(
+    def test_refresh_dropbox_connection_error(
         self,
         dropbox_credential: OAuthCredential[DropboxManager],
     ):
         """Test refresh handles network errors gracefully."""
-        cred = dropbox_credential
+        with pytest.raises(ConnectionError, match='Network unreachable'):
+            self._refresh_dropbox(
+                cred=dropbox_credential,
+                side_effect=ConnectionError('Network unreachable'),
+            )
 
-        # Mock the Dropbox client to raise network error
-        mock_client = Mock()
-        mock_client.check_and_refresh_access_token.side_effect = ConnectionError(
-            'Network unreachable'
-        )
-
-        # Create mock manager with client
-        mock_manager = Mock()
-        mock_manager.client = mock_client
-
-        # Patch the manager property
-        with (
-            patch.object(type(cred), 'manager', property(lambda _: mock_manager)),
-            pytest.raises(ConnectionError, match='Network unreachable'),
-        ):
-            _refresh_dropbox(cred)
-
-    def test_refresh_dropbox_http_error(
+    def test_refresh_dropbox_auth_error(
         self,
         dropbox_credential: OAuthCredential[DropboxManager],
     ):
-        """Test refresh handles HTTP errors gracefully."""
         from dropbox.exceptions import AuthError
 
-        cred = dropbox_credential
-
-        # Mock the Dropbox client to raise auth error
-        mock_client = Mock()
-        mock_client.check_and_refresh_access_token.side_effect = AuthError('req_id', None)
-
-        # Create mock manager with client
-        mock_manager = Mock()
-        mock_manager.client = mock_client
-
-        # Patch the manager property
-        with (
-            patch.object(type(cred), 'manager', property(lambda _: mock_manager)),
-            pytest.raises(AuthError),
-        ):
-            _refresh_dropbox(cred)
+        with pytest.raises(AuthError):
+            self._refresh_dropbox(
+                cred=dropbox_credential,
+                side_effect=AuthError('req_id', None),
+            )
 
     def test_credential_refresh_integration(
         self,
@@ -1106,8 +1137,10 @@ class TestCertificateAuthentication:
         """Refresh token failure should trigger certificate auth."""
         manager = msauth_manager_factory(microsoft_credential)
 
-        with patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt, \
-             patch.object(manager.client, 'acquire_token_for_client') as mock_cert:
+        with (
+            patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt,
+            patch.object(manager.client, 'acquire_token_for_client') as mock_cert,
+        ):
             mock_rt.return_value = {'error': 'invalid_grant', 'error_description': 'Bad token'}
             mock_cert.return_value = {'access_token': 'cert_token', 'expires_in': 3600}
 
@@ -1120,9 +1153,11 @@ class TestCertificateAuthentication:
         """Certificate auth token should flow through refresh() → update_from_refresh()."""
         manager = msauth_manager_factory(microsoft_credential)
 
-        with patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt, \
-             patch.object(manager.client, 'acquire_token_for_client') as mock_cert, \
-             patch.object(manager, '_authenticate_with_certificate') as mock_cert_auth:
+        with (
+            patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt,
+            patch.object(manager.client, 'acquire_token_for_client') as mock_cert,
+            patch.object(manager, '_authenticate_with_certificate') as mock_cert_auth,
+        ):
             mock_rt.return_value = {'error': 'invalid_grant', 'error_description': 'Bad token'}
             mock_cert_auth.return_value = {'access_token': 'cert_token', 'expires_in': 3600}
 
@@ -1174,7 +1209,7 @@ class TestTokenProperty:
     """Test OAuthCredential.token property for Azure SDK compatibility."""
 
     def test_token_property_returns_access_token_object(self, microsoft_credential):
-        """token property should return AccessToken for Azure SDK."""
+        """Token property should return AccessToken for Azure SDK."""
         from azure.core.credentials import AccessToken
 
         token = microsoft_credential.token
@@ -1184,7 +1219,7 @@ class TestTokenProperty:
         assert token.expires_on == int(microsoft_credential.expires_at.timestamp())
 
     def test_token_property_with_dropbox_credential(self, dropbox_credential):
-        """token property should work with any credential type."""
+        """Token property should work with any credential type."""
         from azure.core.credentials import AccessToken
 
         token = dropbox_credential.token
@@ -1217,7 +1252,7 @@ class TestEdgeCases:
             manager._validate_token_data(error_response)
 
     def test_scope_filtering_removes_reserved_scopes(self, microsoft_credential):
-        """scopes property should filter reserved MSAL scopes."""
+        """Scopes property should filter reserved MSAL scopes."""
         cred = replace(
             microsoft_credential,
             scope='Mail.Read offline_access openid profile User.Read',
@@ -1232,9 +1267,14 @@ class TestEdgeCases:
 
     def test_manager_creation_failure_propagates(self, dropbox_credential):
         """Factory failures should propagate exceptions."""
-        with patch('automate.eserv.util.dbx_manager.DropboxManager.__init__', side_effect=ValueError('Bad config')):
-            with pytest.raises(ValueError, match='Bad config'):
-                dropbox_manager_factory(dropbox_credential)
+        with (
+            patch(
+                'automate.eserv.util.dbx_manager.DropboxManager.__init__',
+                side_effect=ValueError('Bad config'),
+            ),
+            pytest.raises(ValueError, match='Bad config'),
+        ):
+            dropbox_manager_factory(dropbox_credential)
 
     def test_refresh_handler_binding(self, dropbox_credential):
         """Handler should be bound method of manager instance."""

@@ -48,7 +48,7 @@ def mock_config() -> Mock:
 @pytest.fixture
 def graph_client(mock_credential: Mock, mock_config: Mock) -> GraphClient:
     """Create GraphClient instance for testing."""
-    return graph_client_factory(credential=mock_credential, config=mock_config)
+    return graph_client_factory(config=mock_config)
 
 
 class TestFilterExpression:

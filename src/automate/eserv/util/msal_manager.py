@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import new_class
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from azure.core.credentials import AccessToken, TokenCredential
 from msal import ConfidentialClientApplication
@@ -13,9 +13,6 @@ from rampy import create_field_factory
 
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
-
-if TYPE_CHECKING:
-    pass
 
 
 def _build_client_credential() -> dict[str, str]:
@@ -54,6 +51,10 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
         return self.credential.get('authority', '').rsplit('/', maxsplit=1)[-1]
 
     _client_cred: dict[str, str] | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        if 'authority' not in self.credential:
+            self.credential['authority'] = 'https://login.microsoftonline.com/common'
 
     @property
     def client_credential(self) -> dict[str, str]:
@@ -115,8 +116,6 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             seconds = int(result.pop('expires_in', 3600))
             result['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
 
-            # Return token data instead of mutating credential
-            # Let caller handle update via update_from_refresh()
             return result
 
     def _validate_token_data(
@@ -184,7 +183,7 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
         # Filter out MSAL reserved scopes (offline_access, openid, profile)
         # MSAL handles these automatically and raises ValueError if passed explicitly
 
-        token_data = None
+        token_data: dict[str, Any] | None = None
 
         migrated = bool(self.credential.get('msal_migrated'))
 
@@ -201,7 +200,7 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             )
 
         try:
-            token_data = self._validate_token_data(token_data, errors=True)
+            token_data = self._validate_token_data(token_data, errors=True) or {}
         except Exception:
             console.exception('Refresh token authentication failed; attempting certificate auth.')
             return self._authenticate_with_certificate()
@@ -246,9 +245,7 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
     def scopes(self) -> list[str]:
         """Return scope list with reserved scopes filtered out."""
         return [
-            scope
-            for scope in self.credential.scope.split()
-            if scope not in self._RESERVED_SCOPES
+            scope for scope in self.credential.scope.split() if scope not in self._RESERVED_SCOPES
         ]
 
     @property
