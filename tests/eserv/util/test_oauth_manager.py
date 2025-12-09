@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
@@ -74,10 +75,11 @@ def microsoft_credential():
 
 
 class TokenManagerClientConfig(TypedDict, total=False):
-    _oauth2_access_token: str
-    _oauth2_refresh_token: str
-    _oauth2_access_token_expiration: datetime
-    _scope: list[str]
+    access_token: str
+    refresh_token: str
+    expires_at: datetime
+    expires_in: int
+    scopes: list[str]
 
     side_effect: Any
 
@@ -88,14 +90,44 @@ class TestTokenRefresh:
     @staticmethod
     def _refresh_outlook_msal(
         cred: OAuthCredential[Any],
-    ) -> dict[str, Any]:
-        return cred.manager._refresh_token()
+        accounts: Sequence[str] = (),
+        token_attr: str = 'acquire_token_silent',  # noqa: S107
+        **token_data: Unpack[TokenManagerClientConfig],
+    ) -> Mock:
+        mock_client = Mock(spec=['accounts', token_attr])
+        mock_client.configure_mock(**{
+            'accounts.return_value': accounts,
+            f'{token_attr}.return_value': {
+                'access_token': token_data.get('access_token', 'microsoft_token'),
+                'refresh_token': token_data.get('access_token', 'refresh_token'),
+                'token_type': 'bearer',
+                'scope': token_data.get('scopes', ['.default']),
+                'expires_in': token_data.get('expires_in', 3600),
+            },
+            f'{token_attr}.side_effect': token_data.get('side_effect'),
+        })
+
+        mock_manager = Mock()
+        mock_manager.client.return_value = mock_client
+
+        with patch('msal.ConfidentialClientApplication', Mock(return_value=mock_client)):
+            result = cred.refresh()
+
+            getattr(mock_client, token_attr).assert_called_once()
+
+            # Assert returned data has correct structure
+            assert result.access_token == mock_client._oauth2_access_token
+            assert result.refresh_token == mock_client._oauth2_refresh_token
+            assert result.expires_at == mock_client._oauth2_access_token_expiration
+            assert result.scope.split() == mock_client._scope
+
+            return mock_client
 
     @staticmethod
     def _refresh_dropbox(
         cred: OAuthCredential[Any],
         **config: Unpack[TokenManagerClientConfig],
-    ) -> None:
+    ) -> Mock:
         mock_client = Mock(
             spec=[
                 '_oauth2_access_token',
@@ -106,12 +138,12 @@ class TestTokenRefresh:
             ]
         )
         mock_client.configure_mock(**{
-            '_oauth2_access_token': config.get('_oauth2_access_token', 'dropbox_token'),
-            '_oauth2_refresh_token': config.get('_oauth2_refresh_token', 'refresh_token'),
+            '_oauth2_access_token': config.get('access_token', 'dropbox_token'),
+            '_oauth2_refresh_token': config.get('refresh_token', 'refresh_token'),
             '_oauth2_access_token_expiration': config.get(
-                '_oauth2_access_token_expiration', datetime.now(UTC) + timedelta(hours=4)
+                'expires_at', datetime.now(UTC) + timedelta(hours=4)
             ),
-            '_scope': config.get('_scope', ['files.content.write', 'files.metadata.read']),
+            '_scope': config.get('scopes', ['files.content.write', 'files.metadata.read']),
             'check_and_refresh_access_token.return_value': None,
             'check_and_refresh_access_token.side_effect': config.get('side_effect'),
         })
@@ -130,6 +162,8 @@ class TestTokenRefresh:
             assert result.expires_at == mock_client._oauth2_access_token_expiration
             assert result.scope.split() == mock_client._scope
 
+        return mock_client
+
     def test_refresh_dropbox_success(
         self,
         dropbox_credential: OAuthCredential[DropboxManager],
@@ -137,10 +171,10 @@ class TestTokenRefresh:
         """Test successful Dropbox token refresh."""
         self._refresh_dropbox(
             dropbox_credential,
-            _oauth2_access_token='new_dropbox_token',
-            _oauth2_refresh_token='new_refresh_token',
-            _scope=['files.content.write', 'files.metadata.read'],
-            _oauth2_access_token_expiration=datetime.now(UTC) + timedelta(hours=4),
+            access_token='new_dropbox_token',
+            refresh_token='new_refresh_token',
+            scopes=['files.content.write', 'files.metadata.read'],
+            expires_at=datetime.now(UTC) + timedelta(hours=4),
         )
 
     def test_refresh_outlook_msal_success(
@@ -148,41 +182,20 @@ class TestTokenRefresh:
         microsoft_credential: OAuthCredential[MicrosoftAuthManager],
     ):
         """Test successful Outlook token refresh using MSAL (migration mode)."""
-        cred = microsoft_credential
+        mock_client = self._refresh_outlook_msal(
+            microsoft_credential,
+            accounts=[],
+            token_attr='acquire_token_by_refresh_token',
+            access_token='new_outlook_token',
+            refresh_token='new_refresh_token',
+            scopes=['Mail.Read', 'offline_access'],
+            expires_in=3600,
+        )
 
-        # Mock MSAL app
-        mock_app = Mock()
-        mock_msal_result = {
-            'access_token': 'new_outlook_token',
-            'refresh_token': 'new_refresh_token',
-            'token_type': 'bearer',
-            'scope': ['Mail.Read', 'offline_access'],
-            'expires_in': 3600,
-        }
-        mock_app.get_accounts.return_value = []  # No accounts (migration mode)
-        mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
-
-        # Create mock manager with MSAL client
-        mock_manager = Mock()
-        mock_manager.client = mock_app
-
-        # Patch the manager property
-        with patch.object(type(cred), 'manager', property(lambda _: mock_manager)):
-            result = _refresh_outlook_msal(cred)
-
-            # Assert acquire_token_by_refresh_token was called
-            # Note: offline_access is filtered out (reserved scope)
-            mock_app.acquire_token_by_refresh_token.assert_called_once_with(
-                refresh_token=cred.refresh_token,
-                scopes=['Mail.Read'],  # offline_access filtered out
-            )
-
-            # Assert returned data has correct structure
-            assert result['access_token'] == 'new_outlook_token'
-            assert result['refresh_token'] == 'new_refresh_token'
-            assert result['token_type'] == 'bearer'
-            assert result['scope'] == 'Mail.Read offline_access'
-            assert result['expires_in'] == 3600
+        mock_client.acquire_token_by_refresh_token.assert_called_once_with(
+            refresh_token=microsoft_credential.refresh_token,
+            scopes=['Mail.Read'],  # offline_access filtered out
+        )
 
     def test_refresh_dropbox_connection_error(
         self,
@@ -215,18 +228,15 @@ class TestTokenRefresh:
         # Create credential with mocked handler
         mock_handler = Mock(return_value={'access_token': 'new_token', 'expires_in': 3600})
 
-        cred = replace(dropbox_credential, handler=mock_handler)
+        with patch.object(cred := dropbox_credential, 'handler', mock_handler):
+            refreshed = cred.refresh()
 
-        # Call refresh
-        refreshed = cred.refresh()
+            mock_handler.assert_called_once()
 
-        # Assert handler was called
-        mock_handler.assert_called_once_with(cred)
-
-        # Assert new credential returned
-        assert refreshed.access_token == 'new_token'
-        assert refreshed.expires_at is not None
-        assert refreshed.expires_at > datetime.now(UTC)
+            # Assert new credential returned
+            assert refreshed.access_token == 'new_token'
+            assert refreshed.expires_at is not None
+            assert refreshed.expires_at > datetime.now(UTC)
 
     def test_refresh_without_handler_raises_error(
         self,
