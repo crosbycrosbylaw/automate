@@ -50,6 +50,7 @@ ignore = [
     "D418",    # Overload docstrings give contextually relevant information
     "E501",    # Line length is purely stylistic
     "PLC0415", # Sometimes lazy imports are necessary
+    'PLC2801',
 ]
 
 select = [

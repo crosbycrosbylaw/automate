@@ -61,10 +61,10 @@ def _validate_token_data(
     if not isinstance(token_data, dict):
         raise TypeError(f'Expected dict, got {type(token_data).__name__}')
 
-    if 'error' not in token_data:
-        return token_data
+    if 'error' in token_data:
+        _raise_dynamic_exception(token_data)
 
-    _raise_dynamic_exception(token_data)
+    return token_data
 
 
 def _parse_auth_response(result: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -79,7 +79,7 @@ def _parse_auth_response(result: dict[str, Any] | None) -> dict[str, Any] | None
         result = result or {}
         console.error(event='Authentication failed', **result)
 
-    return _validate_token_data(result, errors=False)
+    return _validate_token_data(result, errors=True)
 
 
 def _set_certificate_path_from_input() -> bool:
@@ -249,8 +249,10 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
         if token_data is not None:
             return _prepare_token_data_for_update(token_data, self.credential)
 
-        console.error('Token authentication failed')
-        return {}
+        _raise_dynamic_exception({
+            'error': 'auth_error',
+            'error_description': 'Token refresh was unsuccessful',
+        })
 
     def get_token(self, *_: ..., **__: ...) -> AccessToken:
         expiration = self.credential.expires_at

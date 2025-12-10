@@ -97,8 +97,19 @@ def msal_refresh_test_case(
     cred: OAuthCredential[Any],
     accounts: Sequence[Any] = (),
     refresh_method: _MSALRefreshMethodDescriptor = 'silent',
+    acquire_mocks: dict[
+        Literal[
+            'acquire_token_silent',
+            'acquire_token_by_refresh_token',
+            'acquire_token_for_client',
+        ],
+        Mock,
+    ]
+    | None = None,
     **config: Unpack[TokenManagerClientConfig],
 ) -> Mock:
+
+    error_data = config.get('error_result')
 
     response_data = {
         'access_token': config.get('access_token', 'microsoft_token'),
@@ -108,10 +119,12 @@ def msal_refresh_test_case(
         'expires_in': config.get('expires_in', 3600),
     }
 
-    mock_acquire_token = Mock(
-        return_value=config.get('error_result', response_data),
-        side_effect=config.get('side_effect'),
-    )
+    def acquire_token():
+        if se := config.get('side_effect'):
+            raise se
+        return error_data or response_data
+
+    mock_acquire_token = Mock(wraps=acquire_token)
 
     mock_client = Mock(spec=ConfidentialClientApplication)
     mock_client.configure_mock(**{'get_accounts.return_value': accounts})
@@ -141,8 +154,14 @@ def msal_refresh_test_case(
         target='automate.eserv.util.msal_manager.ConfidentialClientApplication',
         new=Mock(return_value=mock_client),
     ):
-        if not config.get('refresh', True):
+        if config.get('refresh') is False:
             mock_acquire_token.assert_not_called()
+
+        elif error_data is not None:
+            with pytest.raises(
+                match=error_data.get('error_description', 'Token refresh was unsuccessful')
+            ):
+                result = cred.refresh()
 
         else:
             started_at = time.time()
