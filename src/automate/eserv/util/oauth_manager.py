@@ -23,9 +23,7 @@ def _parse_expiry(data: CredentialsJSON | dict[str, Any]) -> datetime | None:
     expires_key = next((k for k in data if k.startswith('expires')), '')
     expires_val = data.pop(expires_key, None)
 
-    if not isinstance(expires_val, int | datetime) or (
-        isinstance(expires_val, str) and not all(x in expires_val for x in ('-', 'T', ':', '.'))
-    ):
+    if not isinstance(expires_val, str | int | datetime):
         return None
 
     match expires_key:
@@ -34,11 +32,15 @@ def _parse_expiry(data: CredentialsJSON | dict[str, Any]) -> datetime | None:
             if isinstance(expires_val, int | str):
                 duration = timedelta(seconds=int(expires_val))
                 return datetime.fromisoformat(issued) + duration
+
         case 'expires_at':
             if isinstance(expires_val, datetime):
                 return expires_val
             if isinstance(expires_val, str):
+                if not all(x in expires_val for x in (':', '-')):
+                    return None
                 return datetime.fromisoformat(expires_val)
+
         case _:
             return None
 
@@ -103,7 +105,8 @@ class OAuthCredential[T = Any]:
         self.manager = self.manager_factory(self)
 
         if not isinstance(self.manager, TokenManager):
-            raise TypeError(self.manager)
+            message = f'expected {TokenManager}; received {type(self.manager)}'
+            raise TypeError(message)
 
         self.handler = self.manager._refresh_token
 
@@ -152,9 +155,7 @@ class OAuthCredential[T = Any]:
 
         """
         data = {
-            f.name: f'{getattr(self, f.name)!s}'
-            for f in fields(self)
-            if 'internal_only' not in f.metadata
+            f.name: getattr(self, f.name) for f in fields(self) if 'internal_only' not in f.metadata
         }
 
         if isinstance(exp := data['expires_at'], datetime):
@@ -190,17 +191,8 @@ class OAuthCredential[T = Any]:
         Returns:
             New OAuthCredential instance with updated token information.
 
-        Raises:
-            ValueError:
-                If the `handler` property for this instance has not been set.
-
         """
-        if self.handler is None:
-            message = 'There is no configuration set for this credential.'
-            raise ValueError(message)
-
-        token_data = self.handler()
-        return self.update_from_refresh(token_data)
+        return self.update_from_refresh(self.handler())
 
     def object_hook(self, obj: dict[str, Any]) -> Self:
         """Return this credential with information updated from the given dictionary.

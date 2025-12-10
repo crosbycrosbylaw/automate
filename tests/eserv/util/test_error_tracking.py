@@ -78,9 +78,9 @@ class TestErrorTracker:
         error_message: str,
         test_persistence: bool,
         test_retrieval: bool,
-        tempdir: Path,
+        directory: Path,
     ):
-        log_file = tempdir / 'error_log.json'
+        log_file = directory / 'error_log.json'
 
         if test_persistence:
             # Test persistence across instances

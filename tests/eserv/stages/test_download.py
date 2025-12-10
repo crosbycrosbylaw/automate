@@ -65,10 +65,10 @@ def mock_soup() -> Mock:
 class TestDownloadDocuments:
     """Test download_documents orchestration."""
 
-    def test_successful_single_pdf_download(self, mock_soup: Mock, tempdir: Path) -> None:
+    def test_successful_single_pdf_download(self, mock_soup: Mock, directory: Path) -> None:
         """Test successful download of single PDF document."""
         # Create temp directory for document store
-        temp_path = tempdir / 'downloads'
+        temp_path = directory / 'downloads'
         temp_path.mkdir(exist_ok=True)
 
         # Mock extract_download_info
@@ -115,9 +115,9 @@ class TestDownloadDocuments:
             # Verify file was saved
             assert (temp_path / 'Motion.pdf').exists()
 
-    def test_multi_file_download(self, mock_soup: Mock, tempdir) -> None:
+    def test_multi_file_download(self, mock_soup: Mock, directory) -> None:
         """Test download of multiple documents from HTML with links."""
-        temp_path = tempdir / 'downloads'
+        temp_path = directory / 'downloads'
         temp_path.mkdir(exist_ok=True)
 
         mock_info = Mock()

@@ -9,33 +9,24 @@ from automate.eserv.extract import extract_upload_info
 from tests.eserv.lib import create_sample_email
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from typing import Any
-
-
-CASE_NAME = 'DAILEY EMILY vs. DAILEY DERRICK'
-TEMP = test.directory('rampy_pytest')
 
 
 def scenario(
     count: int,
-    cname: str = CASE_NAME,
+    cname: str = (CASE_NAME := 'DAILEY EMILY vs. DAILEY DERRICK'),
     /,
     **expect: object,
 ) -> dict[str, Any]:
     expect.setdefault('case_name', CASE_NAME)
     expect.setdefault('doc_count', count)
-
-    content = create_sample_email(case_name=cname)
-    soup = BeautifulSoup(content, features='html.parser')
-
-    store_path = TEMP / f'test_store_{count}'
-    store_path.mkdir(parents=True, exist_ok=True)
-
-    for i in range(count):
-        doc_path = store_path / f'doc_{i}.pdf'
-        doc_path.touch(exist_ok=True)
-
-    return {'params': [soup, store_path], 'expect': expect}
+    return {
+        'soup': BeautifulSoup(create_sample_email(case_name=cname), features='html.parser'),
+        'store_name': f'test_store_{count}',
+        'documents': [f'doc_{i}.pdf' for i in range(count)],
+        'expect': expect,
+    }
 
 
 @test.scenarios(**{
@@ -52,8 +43,24 @@ class TestExtractUploadInfo:
     - Filtering of confidential cases
     """
 
-    def test(self, /, params: list[Any], expect: dict[str, Any]) -> None:
-        result = extract_upload_info(*params)
+    def test(
+        self,
+        /,
+        soup: BeautifulSoup,
+        store_name: Path,
+        documents: list[str],
+        expect: dict[str, Any],
+        directory: Path,
+    ) -> None:
+
+        store_path = directory / store_name
+        store_path.mkdir(parents=True, exist_ok=True)
+
+        for fname in documents:
+            doc_path = store_path / fname
+            doc_path.touch(exist_ok=True)
+
+        result = extract_upload_info(soup, store_path)
 
         expect_doc_count = expect['doc_count']
         assert result.doc_count == expect_doc_count, \

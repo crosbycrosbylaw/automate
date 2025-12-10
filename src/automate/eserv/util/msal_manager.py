@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import new_class
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 
 from azure.core.credentials import AccessToken, TokenCredential
 from msal import ConfidentialClientApplication
@@ -14,8 +15,86 @@ from rampy import create_field_factory
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
 
+if TYPE_CHECKING:
+    from automate.eserv.types import OAuthCredential
 
-def _build_client_credential() -> dict[str, str]:
+
+def _raise_dynamic_exception(token_data: dict[str, Any]) -> NoReturn:
+    error_name: str = token_data.pop('error', 'Error')
+
+    if not error_name.endswith('_error'):
+        error_name = f'{error_name}_error'
+
+    error_desc: str = token_data.pop('error_description', 'something went wrong')
+
+    error_cls: type[Exception] = new_class(
+        name=''.join(x.capitalize() for x in error_name.split('_')),
+        bases=(Exception,),
+    )
+
+    message = f'{error_desc}\n\n{"\n".join(f"{k}={v}" for k, v in token_data.items())}'
+    raise error_cls(message)
+
+
+def _validate_token_data(
+    token_data: object,
+    errors: bool = True,
+) -> dict[str, Any] | None:
+    """Validate token data and handle errors.
+
+    Args:
+        token_data: Raw token response from MSAL
+        errors: If True, raise exception on error; if False, return None on error
+
+    Returns:
+        Validated token data dict, or None if errors=False and data is invalid
+
+    Raises:
+        TypeError: If token_data is not a dict
+        DynamicException: If token_data contains error (when errors=True)
+
+    """
+    if errors is False:
+        with contextlib.suppress(Exception):
+            return _validate_token_data(token_data)
+
+    if not isinstance(token_data, dict):
+        raise TypeError(f'Expected dict, got {type(token_data).__name__}')
+
+    if 'error' not in token_data:
+        return token_data
+
+    _raise_dynamic_exception(token_data)
+
+
+def _parse_auth_response(result: dict[str, Any] | None) -> dict[str, Any] | None:
+
+    if result and 'access_token' in result:
+        console.info('Access Token acquired')
+
+        seconds = int(result.pop('expires_in', 3600))
+        result['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
+
+    else:
+        result = result or {}
+        console.error(event='Authentication failed', **result)
+
+    return _validate_token_data(result, errors=False)
+
+
+def _set_certificate_path_from_input() -> bool:
+    if strpath := input('Enter the path to private key file: '):
+        if not Path(strpath).is_absolute():
+            strpath = f'{Path(os.environ["PROJECT_ROOT"]) / strpath}'
+
+        cert_private_key_path = Path(strpath).resolve(strict=True)
+        os.environ['CERT_PRIVATE_KEY_PATH'] = str(cert_private_key_path)
+
+        return True
+    return False
+
+
+def _build_app_cred() -> dict[str, str]:
     try:
         project_root = Path(os.environ['PROJECT_ROOT'])
 
@@ -35,6 +114,31 @@ def _build_client_credential() -> dict[str, str]:
         return {'thumbprint': thumbprint, 'private_key': private_key}
 
 
+def _prepare_token_data_for_update(
+    token_data: dict[str, Any],
+    credential: OAuthCredential,
+):
+
+    out: dict[str, Any] = {}
+
+    current = credential.export()
+
+    for key in 'id_token', 'id_token_claims', 'client_info', 'token_source':
+        if value := token_data.pop(key, None):
+            current[key] = value
+
+    for key, data_value in token_data.items():
+        if data_value and any(x in key for x in ('token', 'expires')):
+            out[key] = data_value
+        elif attr_value := current.get(key):
+            out[key] = attr_value
+
+    if isinstance(scope := out.get('scope'), list):
+        out['scope'] = ' '.join(scope)
+
+    return out
+
+
 @dataclass(slots=True)
 class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCredential):
     """Microsoft authentication wrapper from an OAuth credential.
@@ -50,20 +154,43 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
     def tenant_id(self) -> str:
         return self.credential.get('authority', '').rsplit('/', maxsplit=1)[-1]
 
-    _client_cred: dict[str, str] | None = field(init=False, default=None)
+    _client_cred: dict[str, str] | str | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         if 'authority' not in self.credential:
             self.credential['authority'] = 'https://login.microsoftonline.com/common'
 
     @property
-    def client_credential(self) -> dict[str, str]:
+    def client_cred(self) -> dict[str, str] | str:
         if not self._client_cred:
-            self._client_cred = _build_client_credential()
+            from automate.eserv.errors.types import MissingVariableError
+
+            try:
+                client_cred = _build_app_cred()
+            except MissingVariableError:
+                client_cred = self.credential.client_secret
+
+            self._client_cred = client_cred
 
         return self._client_cred
 
-    def _authenticate_with_certificate(self) -> dict[str, Any]:
+    def _authenticate_silent(self) -> dict[str, Any] | None:
+        return _parse_auth_response(
+            self.client.acquire_token_silent(
+                scopes=self.scopes,
+                account=None if not (accounts := self.client.get_accounts()) else accounts[0],
+            )
+        )
+
+    def _authenticate_with_refresh_token(self) -> dict[str, Any] | None:
+        return _parse_auth_response(
+            self.client.acquire_token_by_refresh_token(
+                refresh_token=self.credential.refresh_token,
+                scopes=self.scopes,
+            )
+        )
+
+    def _authenticate_with_certificate(self) -> dict[str, Any] | None:
         """Authenticate using certificate and return token data.
 
         Returns:
@@ -75,93 +202,16 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
 
         """
         try:
-            app = ConfidentialClientApplication(
-                client_id=self.credential.client_id,
-                authority=self.credential['authority'],
-                client_credential=self.client_credential,
-            )
-
-            result = app.acquire_token_for_client(scopes=['.default']) or {}
-
-            if result and 'access_token' in result:
-                console.info('Access Token acquired')
-            else:
-                console.error(
-                    event='Authentication failed',
-                    **{k: v for k, v in result.items() if k.startswith('error')},
-                )
-
+            result = _parse_auth_response(self.client.acquire_token_for_client(scopes=['.default']))
         except FileNotFoundError:
-            console.exception(
-                event='Certificate file not found',
-                private_key_path=os.getenv('CERT_PRIVATE_KEY_PATH'),
-            )
+            if _set_certificate_path_from_input():
+                return self._authenticate_with_certificate()
 
-            if not (strpath := input('Enter the path to private key file: ')):
-                raise
-
-            if not Path(strpath).is_absolute():
-                strpath = f'{Path(os.environ["PROJECT_ROOT"]) / strpath}'
-
-            cert_private_key_path = Path(strpath).resolve(strict=True)
-            os.environ['CERT_PRIVATE_KEY_PATH'] = str(cert_private_key_path)
-
-            return self._authenticate_with_certificate()
-
-        except Exception:
-            console.exception(event='An unexpected exception occurred')
+            console.exception('Certificate file not found', path=os.getenv('CERT_PRIVATE_KEY_PATH'))
             raise
 
         else:
-            seconds = int(result.pop('expires_in', 3600))
-            result['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
-
             return result
-
-    def _validate_token_data(
-        self,
-        token_data: object,
-        errors: bool = True,
-    ) -> dict[str, Any] | None:
-        """Validate token data and handle errors.
-
-        Args:
-            token_data: Raw token response from MSAL
-            errors: If True, raise exception on error; if False, return None on error
-
-        Returns:
-            Validated token data dict, or None if errors=False and data is invalid
-
-        Raises:
-            TypeError: If token_data is not a dict
-            DynamicException: If token_data contains error (when errors=True)
-
-        """
-        if not isinstance(token_data, dict):
-            if errors:
-                raise TypeError(f'Expected dict, got {type(token_data).__name__}')
-            return None
-
-        if errors is False:
-            return None if 'error' in token_data else token_data
-
-        if 'error' not in token_data:
-            return token_data
-
-        error_name: str = token_data.pop('error', 'Error')
-
-        if not error_name.endswith('_error'):
-            error_name = f'{error_name}_error'
-
-        error_desc: str = token_data.pop('error_description', 'something went wrong')
-
-        error_cls: type[Exception] = new_class(
-            name=''.join(x.capitalize() for x in error_name.split('_')),
-            bases=(Exception,),
-        )
-
-        message = f'{error_desc}\n\n{"\n".join(f"{k}={v}" for k, v in token_data.items())}'
-        raise error_cls(message)
 
     def _refresh_token(self) -> dict[str, Any]:
         """Refresh Microsoft Outlook token using MSAL.
@@ -180,62 +230,37 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             RuntimeError: If token refresh fails
 
         """
-        # Filter out MSAL reserved scopes (offline_access, openid, profile)
-        # MSAL handles these automatically and raises ValueError if passed explicitly
+        authentication_methods = [
+            self._authenticate_with_refresh_token,
+            self._authenticate_with_certificate,
+        ]
+
+        if bool(self.credential.get('msal_migrated')):
+            authentication_methods.insert(0, self._authenticate_silent)
 
         token_data: dict[str, Any] | None = None
 
-        migrated = bool(self.credential.get('msal_migrated'))
+        for method in authentication_methods:
+            if token_data := method():
+                break
 
-        if migrated:
-            token_data = self.client.acquire_token_silent(
-                scopes=self.scopes,
-                account=None if not (accounts := self.client.get_accounts()) else accounts[0],
-            )
+            console.warning(f'Failed to authenticate with: {method.__name__}')
 
-        if not self._validate_token_data(token_data, errors=False):
-            token_data = self.client.acquire_token_by_refresh_token(
-                refresh_token=self.credential.refresh_token,
-                scopes=self.scopes,
-            )
+        if token_data is not None:
+            return _prepare_token_data_for_update(token_data, self.credential)
 
-        try:
-            token_data = self._validate_token_data(token_data, errors=True) or {}
-        except Exception:
-            console.exception('Refresh token authentication failed; attempting certificate auth.')
-            return self._authenticate_with_certificate()
-
-        self.credential.extra_properties.update(
-            id_token=token_data.get('id_token'),
-            id_token_claims=token_data.get('id_token_claims'),
-            client_info=token_data.get('client_info'),
-            token_source=token_data.get('token_source'),
-        )
-
-        out: dict[str, Any] = {}
-
-        for key, value in token_data.items():
-            if not value and hasattr(self.credential, key):
-                out[key] = getattr(self.credential, key)
-            elif key.startswith('expires') or 'token' in key:
-                out[key] = value
-
-        if isinstance(scope := out.get('scope'), list):
-            out['scope'] = ' '.join(scope)
-
-        return out
+        console.error('Token authentication failed')
+        return {}
 
     def get_token(self, *_: ..., **__: ...) -> AccessToken:
+        expiration = self.credential.expires_at
 
-        token_data = self._refresh_token()
+        self.credential = self.credential.refresh()
 
-        old_expiration = self.credential.expires_at
-        self.credential = self.credential.update_from_refresh(token_data)
+        if exp := self.credential.expires_at or expiration:
+            return AccessToken(str(self.credential), int(exp.timestamp()))
 
-        if not (exp := old_expiration or self.credential.expires_at):
-            raise ValueError(self.credential)
-
-        return AccessToken(str(self.credential), int(exp.timestamp()))
+        raise ValueError(self.credential)
 
     @property
     def app_uri(self) -> str:
@@ -246,7 +271,7 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
         """Return scope list with reserved scopes filtered out."""
         return [
             scope for scope in self.credential.scope.split() if scope not in self._RESERVED_SCOPES
-        ]
+        ] or ['.default']
 
     @property
     def client(self) -> ConfidentialClientApplication:
@@ -259,9 +284,8 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
         if self._client is None:
             self._client = ConfidentialClientApplication(
                 client_id=self.credential.client_id,
-                client_credential=self.credential.client_secret,
-                authority=self.credential['authority']
-                or 'https://login.microsoftonline.com/common',
+                client_credential=self.client_cred,
+                authority=self.credential['authority'],
             )
 
         return self._client

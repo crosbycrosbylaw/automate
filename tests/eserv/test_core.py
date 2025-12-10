@@ -12,7 +12,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -20,10 +20,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from automate.eserv.core import Pipeline
-from automate.eserv.enums import status
-from automate.eserv.errors.pipeline import *
-from automate.eserv.types import IntermediaryResult
+from automate.eserv import *
+from automate.eserv.core import *
+from automate.eserv.types import *
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -32,11 +31,29 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def mock_dotenv_path(tempdir) -> Path:
+def mock_dotenv_path(directory) -> Path:
     """Create mock .env file path."""
-    env_path = tempdir / '.env'
+    env_path = directory / '.env'
     env_path.write_text('TEST_VAR=test_value\n')
     return env_path
+
+
+def new_mock_processor(
+    batch_result_config: Mapping[str, int] | None = None,
+    summarize_returns: Any | None = None,
+) -> Mock:
+    mock_batch_result = Mock(spec=BatchResult)
+    mock_batch_result.configure_mock(
+        **{'summarize.return_value': summarize_returns or {}},
+        **(batch_result_config or {}),
+    )
+
+    mock_processor = Mock(spec=EmailProcessor)
+    mock_processor.configure_mock(**{
+        'process_batch.return_value': mock_batch_result,
+    })
+
+    return mock_processor
 
 
 def _resolve_dependency_name(key: CoreDependency) -> str:
@@ -52,9 +69,9 @@ def _resolve_dependency_name(key: CoreDependency) -> str:
 
 
 @pytest.fixture
-def mock_dependencies(tempdir) -> dict[str, Mock]:
+def mock_dependencies(directory) -> dict[str, Mock]:
     """Mock all Pipeline dependencies."""
-    service_dir = tempdir / 'svc'
+    service_dir = directory / 'svc'
     service_dir.mkdir(exist_ok=True, parents=True)
 
     mock_config = Mock()
@@ -177,7 +194,7 @@ class TestPipelineInit:
 
     def test_state_tracker_initialization(
         self,
-        tempdir,
+        directory,
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
     ) -> None:
@@ -187,14 +204,14 @@ class TestPipelineInit:
             pipeline = Pipeline()
 
             # Verify state_tracker called with state file path
-            mock_core['state'].assert_called_once_with(tempdir / 'svc' / 'state.json')
+            mock_core['state'].assert_called_once_with(directory / 'svc' / 'state.json')
 
             # Verify pipeline.state set
             assert pipeline.state is mock_dependencies['state']
 
     def test_error_tracker_initialization(
         self,
-        tempdir,
+        directory: Path,
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
     ) -> None:
@@ -204,7 +221,7 @@ class TestPipelineInit:
             pipeline = Pipeline()
 
             # Verify error_tracker called with error log path
-            expected_path = tempdir / 'svc' / 'error_log.json'
+            expected_path = directory / 'svc' / 'error_log.json'
             mock_core['tracker'].assert_called_once_with(expected_path)
 
             # Verify pipeline.tracker set
@@ -252,11 +269,11 @@ class TestPipelineProcess:
         self,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test successful processing through all 6 stages."""
         # Setup temp store path
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
         pdf_path = store_path / 'Motion.pdf'
         pdf_path.write_bytes(b'%PDF-1.4\nTest PDF')
@@ -348,10 +365,10 @@ class TestPipelineProcess:
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test upload info extraction failure returns error result."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
 
         # Create mock download info
@@ -381,10 +398,10 @@ class TestPipelineProcess:
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test duplicate email detection via state tracker."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
 
         # Mock state to return True for is_processed
@@ -415,11 +432,11 @@ class TestPipelineProcess:
         self,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test NO_WORK when no PDF files after download."""
         # Empty store directory (no PDFs)
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
 
         # Create mock download info
@@ -446,10 +463,10 @@ class TestPipelineProcess:
         self,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test SUCCESS status from successful upload."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
         pdf_path = store_path / 'Motion.pdf'
         pdf_path.write_bytes(b'%PDF-1.4\nTest')
@@ -483,10 +500,10 @@ class TestPipelineProcess:
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test MANUAL_REVIEW status when no folder match."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
         pdf_path = store_path / 'Motion.pdf'
         pdf_path.write_bytes(b'%PDF-1.4\nTest')
@@ -523,10 +540,10 @@ class TestPipelineProcess:
         mock_dependencies: dict[str, Mock],
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test ERROR status from upload failure."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
 
         pdf_path = store_path / 'Motion.pdf'
@@ -560,36 +577,38 @@ class TestPipelineProcess:
 class TestPipelineMonitor:
     """Test Pipeline.monitor() workflow."""
 
-    def test_batch_processing_via_email_processor(
+    @pytest.mark.asyncio
+    async def test_batch_processing_via_email_processor(
         self,
         mock_core_factory: MockCoreFactory,
     ) -> None:
         """Test monitor delegates to EmailProcessor."""
         with (
             mock_core_factory('config', 'state', 'tracker'),
-            patch('automate.eserv.core.processor_factory') as mock_processor_class,
+            patch('automate.eserv.core.processor_factory') as mock_processor_factory,
         ):
             # Mock EmailProcessor.process_batch
-            mock_processor = Mock()
-            mock_batch_result = Mock(spec=['summarize'], total=5, succeeded=4, failed=1)
-            mock_batch_result.summarize.return_value = {}
-            mock_processor.process_batch.return_value = mock_batch_result
-            mock_processor_class.return_value = mock_processor
+            mock_processor = new_mock_processor(
+                batch_result := {'total': 5, 'succeeded': 4, 'failed': 1}
+            )
+
+            mock_processor_factory.return_value = mock_processor
 
             # Initialize pipeline and monitor
-            pipeline = Pipeline()
-            result = pipeline.monitor(num_days=1)
+            result = await (pipeline := Pipeline()).monitor(num_days=1)
 
             # Verify EmailProcessor created with pipeline
-            mock_processor_class.assert_called_once_with(pipeline)
+            mock_processor_factory.assert_called_once_with(pipeline)
 
             # Verify process_batch called
             mock_processor.process_batch.assert_called_once_with(1)
 
-            # Verify result returned
-            assert result is mock_batch_result
+            for key, expected in batch_result.items():
+                actual = getattr(result, key)
+                assert actual == expected, f'{key.capitalize()} mismatch: {actual} != {expected}'
 
-    def test_error_log_cleanup_before_processing(
+    @pytest.mark.asyncio
+    async def test_error_log_cleanup_before_processing(
         self,
         mock_dependencies: dict,
         mock_core_factory: MockCoreFactory,
@@ -597,17 +616,14 @@ class TestPipelineMonitor:
         """Test error log cleanup called before monitoring."""
         with (
             mock_core_factory('config', 'state', 'tracker'),
-            patch('automate.eserv.core.processor_factory') as mock_processor_class,
+            patch('automate.eserv.core.processor_factory') as mock_processor_factory,
         ):
-            mock_processor = Mock()
-            mock_batch_result = Mock(spec=['summarize'], failed=0, succeeded=0, total=0)
-            mock_batch_result.summarize.return_value = {}
-            mock_processor.process_batch.return_value = mock_batch_result
-            mock_processor_class.return_value = mock_processor
+            mock_processor = new_mock_processor()
+            mock_processor_factory.return_value = mock_processor
 
             # Initialize pipeline and monitor
             pipeline = Pipeline()
-            pipeline.monitor(num_days=1)
+            await pipeline.monitor(num_days=1)
 
             # Verify error cleanup called
             mock_dependencies['tracker'].clear_old_errors.assert_called_once_with(days=30)
@@ -623,10 +639,10 @@ class TestPipelineExecute:
         self,
         mock_core_factory: MockCoreFactory,
         sample_email_record,
-        tempdir,
+        directory,
     ) -> None:
         """Test execute wraps process() successfully."""
-        store_path = tempdir / 'docs'
+        store_path = directory / 'docs'
         store_path.mkdir(exist_ok=True)
         pdf_path = store_path / 'Motion.pdf'
         pdf_path.write_bytes(b'%PDF-1.4\nTest')

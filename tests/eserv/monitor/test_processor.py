@@ -10,6 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
@@ -167,7 +168,8 @@ def process_batch_scenario(
 class TestProcessBatch:
     """Test batch processing workflow."""
 
-    def test(
+    @pytest.mark.asyncio
+    async def test(
         self,
         /,
         params: list[Any],
@@ -196,7 +198,12 @@ class TestProcessBatch:
                 email_records.append(rec)
 
         mock_client = Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
-        mock_client.fetch_unprocessed_emails.return_value = email_records
+
+        async def mock_fetch_unprocessed(*_: ...):
+            await asyncio.sleep(1)
+            return email_records
+
+        mock_client.fetch_unprocessed_emails = mock_fetch_unprocessed
 
         processor = processor_factory(pipeline=mock_pipeline)
         processor.client = mock_client
@@ -235,7 +242,7 @@ class TestProcessBatch:
         expect_total = expect_total or len(records)
         expect_called = expect_called or expect_total
 
-        batch_result = processor.process_batch(num_days=1)
+        batch_result = await processor.process_batch(num_days=1)
 
         assert batch_result.total == expect_total
         assert batch_result.succeeded == expect_succeeded
@@ -250,7 +257,8 @@ class TestProcessBatch:
             assert mock_pipeline.state.record.call_count == expect_called
 
 
-def test_flag_application_failure_continues_processing(
+@pytest.mark.asyncio
+async def test_flag_application_failure_continues_processing(
     mock_pipeline: Mock,
     sample_email_record: EmailRecord,
 ) -> None:
@@ -258,8 +266,12 @@ def test_flag_application_failure_continues_processing(
     processor = processor_factory(pipeline=mock_pipeline)
     mock_client = Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
 
+    async def mock_fetch_unprocessed(*_: ...):
+        await asyncio.sleep(1)
+        return [sample_email_record]
+
     # Mock fetch returns 1 email
-    mock_client.fetch_unprocessed_emails.return_value = [sample_email_record]
+    mock_client.fetch_unprocessed_emails = mock_fetch_unprocessed
 
     # Mock execute returns success
     mock_pipeline.execute.return_value = result_factory(
@@ -276,7 +288,7 @@ def test_flag_application_failure_continues_processing(
     processor.client = mock_client
 
     # Execute batch processing - should NOT raise
-    result = processor.process_batch(num_days=1)
+    result = await processor.process_batch(num_days=1)
 
     # Verify processing completed despite flag failure
     assert result.total == 1

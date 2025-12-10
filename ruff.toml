@@ -114,6 +114,7 @@ logger-objects     = ["setup_console.console"]
         "I",
         "PLW0131",
         "UP037",
+        "BLE001",
     ]
     "**/*.pyi" = ["D", "N", "A001", "A002"]
     "**/tests/**" = [
@@ -131,6 +132,8 @@ logger-objects     = ["setup_console.console"]
         "S106",
         "ARG001",
         "S105",
+        "BLE001",
+        "PT010",
     ]
     "__init__.py" = ["E402"]
 

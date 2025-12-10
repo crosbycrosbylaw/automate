@@ -48,8 +48,8 @@ def mock_paths() -> Mock:
 
 
 @pytest.fixture
-def mock_cache(tempdir: Path) -> Mock:
-    return Mock(index_file=tempdir / 'tmp' / 'index_cache.json', ttl_hours=4)
+def mock_cache(directory: Path) -> Mock:
+    return Mock(index_file=directory / 'tmp' / 'index_cache.json', ttl_hours=4)
 
 
 @pytest.fixture
@@ -80,9 +80,9 @@ def mock_config(
 
 
 @pytest.fixture
-def mock_document(tempdir: Path) -> Path:
+def mock_document(directory: Path) -> Path:
     """Create mock PDF file."""
-    pdf_path = tempdir / 'test_document.pdf'
+    pdf_path = directory / 'test_document.pdf'
     pdf_path.write_bytes(b'%PDF-1.4\nMock PDF content')
     return pdf_path
 

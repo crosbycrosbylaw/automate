@@ -364,7 +364,7 @@ if TYPE_CHECKING:
 
 # Standard pytest fixtures for mock objects
 @pytest.fixture
-def mock_dependencies(tempdir) -> dict[str, Mock]:
+def mock_dependencies(directory) -> dict[str, Mock]:
     """Mock all component dependencies."""
     # Create mock objects with default behavior
     mock_config = Mock()
@@ -537,13 +537,13 @@ class FixtureClass:
         """Callable implementation."""
 ```
 
-### Tempdir Management
+### directory Management
 
 **Use rampy's test.directory():**
 
 ```python
 @pytest.fixture
-def tempdir() -> Generator[Path]:
+def directory() -> Generator[Path]:
     path = test.directory('pytest_temp')
     try:
         yield path
@@ -680,7 +680,7 @@ class my_scenario:
 
 **Fix:** Use simple factory functions returning dicts.
 
-### ❌ Manual tempdir management
+### ❌ Manual directory management
 
 ```python
 # DON'T DO THIS
@@ -713,7 +713,7 @@ When updating tests to comply with standards:
 -   [ ] Update imports to match pattern
 -   [ ] Create scenario factory functions (Pattern A) or fixture class (Pattern B)
 -   [ ] Use positional-only `self` parameter for scenario tests
--   [ ] Replace manual tempdir with `rampy.test.directory()`
+-   [ ] Replace manual directory with `rampy.test.directory()`
 -   [ ] Move complex setup to `converter()` method (Pattern B)
 -   [ ] Use lambda assertions and extensions (Pattern B)
 -   [ ] Remove conditional logic from test body

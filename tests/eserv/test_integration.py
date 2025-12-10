@@ -59,11 +59,11 @@ class TestUploadWorkflow:
         /,
         params: list[Any],
         record: EmailRecord,
-        tempdir: Path,
+        directory: Path,
     ):
         case_name, folders, is_duplicate = params[0]
 
-        temp = tempdir / 'svc'
+        temp = directory / 'svc'
 
         # Initialize components
         state_file = temp / 'email_state.json'
