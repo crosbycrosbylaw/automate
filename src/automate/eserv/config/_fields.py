@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, init=False)
 class _MonitoringFields:
     monitor_num_days: int = field(default_factory=ev_int_factory('MONITORING_LOOKBACK_DAYS', 1))
     monitor_mail_folder_path: list[str] = field(
@@ -25,7 +25,7 @@ class _MonitoringFields:
     )
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, init=False)
 class _SMTPFields:
     smtp_server: str = field(default_factory=ev_factory('SMTP_SERVER'))
     smtp_port: int = field(default_factory=ev_int_factory('SMTP_PORT', 587))
@@ -42,7 +42,7 @@ class _SMTPFields:
     )
 
 
-@dataclass(frozen=True, slots=True, init=False)
+@dataclass(frozen=True, init=False)
 class _BaseFields:
     dotenv_path: Path | None = field(default=None)
     index_max_age: int = field(default_factory=ev_int_factory('INDEX_CACHE_TTL_HOURS', 4))
