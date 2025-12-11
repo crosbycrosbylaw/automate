@@ -24,10 +24,10 @@ from typing import TYPE_CHECKING
 
 from dropbox.exceptions import ApiError
 
-from automate.eserv.enums import stage, status
+from automate.eserv._module import stage, status
 from automate.eserv.types.results import IntermediaryResult
 from automate.eserv.util import (
-    dropbox_manager_factory,
+    DropboxManager,
     folder_matcher_factory,
     index_cache_factory,
     notifier_factory,
@@ -66,7 +66,7 @@ def upload_documents(
         console.warning('There are no documents to upload.')
         return IntermediaryResult(status=status.NO_WORK)
 
-    dbx = dropbox_manager_factory(config.credentials['dropbox'])
+    dbx = DropboxManager(config.credentials['dropbox'])
     cache = index_cache_factory(config.cache.index_file, ttl_hours=4)
 
     if cache.is_stale():

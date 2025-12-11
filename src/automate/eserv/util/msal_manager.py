@@ -2,21 +2,18 @@ from __future__ import annotations
 
 import contextlib
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from pathlib import Path
 from types import new_class
-from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
+from typing import Any, ClassVar, NoReturn
 
 from azure.core.credentials import AccessToken, TokenCredential
 from msal import ConfidentialClientApplication
-from rampy import create_field_factory
 
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
-
-if TYPE_CHECKING:
-    from automate.eserv.types import OAuthCredential
 
 
 def _raise_dynamic_exception(token_data: dict[str, Any]) -> NoReturn:
@@ -94,6 +91,7 @@ def _set_certificate_path_from_input() -> bool:
     return False
 
 
+@cache
 def _build_app_cred() -> dict[str, str]:
     try:
         project_root = Path(os.environ['PROJECT_ROOT'])
@@ -114,33 +112,8 @@ def _build_app_cred() -> dict[str, str]:
         return {'thumbprint': thumbprint, 'private_key': private_key}
 
 
-def _prepare_token_data_for_update(
-    token_data: dict[str, Any],
-    credential: OAuthCredential,
-):
-
-    out: dict[str, Any] = {}
-
-    current = credential.export()
-
-    for key in 'id_token', 'id_token_claims', 'client_info', 'token_source':
-        if value := token_data.pop(key, None):
-            current[key] = value
-
-    for key, data_value in token_data.items():
-        if data_value and any(x in key for x in ('token', 'expires')):
-            out[key] = data_value
-        elif attr_value := current.get(key):
-            out[key] = attr_value
-
-    if isinstance(scope := out.get('scope'), list):
-        out['scope'] = ' '.join(scope)
-
-    return out
-
-
 @dataclass(slots=True)
-class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCredential):
+class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
     """Microsoft authentication wrapper from an OAuth credential.
 
     Attributes:
@@ -154,25 +127,46 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
     def tenant_id(self) -> str:
         return self.credential.get('authority', '').rsplit('/', maxsplit=1)[-1]
 
-    _client_cred: dict[str, str] | str | None = field(init=False, default=None)
+    @property
+    def app_uri(self) -> str:
+        return f'api://{self.credential.client_id}'
+
+    @property
+    def scopes(self) -> list[str]:
+        """Return scope list with reserved scopes filtered out."""
+        return [scope for scope in self.credential.scope.split() if scope not in self._RESERVED_SCOPES] or [
+            '.default'
+        ]
+
+    @property
+    def client(self) -> ConfidentialClientApplication:
+        """Lazily create MSAL confidential client application.
+
+        Returns:
+            ConfidentialClientApplication instance.
+
+        """
+        if self._client:
+            return self._client
+
+        from automate.eserv.errors.types import MissingVariableError
+
+        try:
+            cred = _build_app_cred()
+        except MissingVariableError:
+            cred = self.credential.client_secret
+
+        client = self._client = ConfidentialClientApplication(
+            client_id=self.credential.client_id,
+            client_credential=cred,
+            authority=self.credential['authority'],
+        )
+
+        return client
 
     def __post_init__(self) -> None:
         if 'authority' not in self.credential:
             self.credential['authority'] = 'https://login.microsoftonline.com/common'
-
-    @property
-    def client_cred(self) -> dict[str, str] | str:
-        if not self._client_cred:
-            from automate.eserv.errors.types import MissingVariableError
-
-            try:
-                client_cred = _build_app_cred()
-            except MissingVariableError:
-                client_cred = self.credential.client_secret
-
-            self._client_cred = client_cred
-
-        return self._client_cred
 
     def _authenticate_silent(self) -> dict[str, Any] | None:
         return _parse_auth_response(
@@ -247,7 +241,7 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             console.warning(f'Failed to authenticate with: {method.__name__}')
 
         if token_data is not None:
-            return _prepare_token_data_for_update(token_data, self.credential)
+            return token_data
 
         _raise_dynamic_exception({
             'error': 'auth_error',
@@ -263,34 +257,3 @@ class MicrosoftAuthManager(TokenManager[ConfidentialClientApplication], TokenCre
             return AccessToken(str(self.credential), int(exp.timestamp()))
 
         raise ValueError(self.credential)
-
-    @property
-    def app_uri(self) -> str:
-        return f'api://{self.credential.client_id}'
-
-    @property
-    def scopes(self) -> list[str]:
-        """Return scope list with reserved scopes filtered out."""
-        return [
-            scope for scope in self.credential.scope.split() if scope not in self._RESERVED_SCOPES
-        ] or ['.default']
-
-    @property
-    def client(self) -> ConfidentialClientApplication:
-        """Lazily create MSAL confidential client application.
-
-        Returns:
-            ConfidentialClientApplication instance.
-
-        """
-        if self._client is None:
-            self._client = ConfidentialClientApplication(
-                client_id=self.credential.client_id,
-                client_credential=self.client_cred,
-                authority=self.credential['authority'],
-            )
-
-        return self._client
-
-
-msauth_manager_factory = create_field_factory(MicrosoftAuthManager)

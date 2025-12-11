@@ -2,22 +2,20 @@ from typing import TYPE_CHECKING
 
 __all__ = [
     'BatchResult',
-    'CacheConfig',
     'CaseMatch',
     'Config',
-    'CredentialManager',
-    'CredentialManager',
+    'CredentialsJSON',
     'DocumentDownloadError',
     'DocumentExtractionError',
     'DocumentUploadError',
     'DownloadInfo',
     'DropboxManager',
+    'EmailAddress',
     'EmailInfo',
     'EmailParseError',
     'EmailProcessor',
     'EmailRecord',
     'EmailState',
-    'EmailStateConfig',
     'ErrorTracker',
     'FolderMatcher',
     'FolderResolutionError',
@@ -25,19 +23,16 @@ __all__ = [
     'IndexCache',
     'IntermediaryResult',
     'InvalidFormatError',
-    'MicrosoftAuthManager',
+    'MSALManager',
     'MissingVariableError',
-    'MonitoringConfig',
     'NotificationConfig',
     'Notifier',
     'OAuthCredential',
     'PartialEmailRecord',
     'PartyExtractor',
-    'PathsConfig',
     'PipelineError',
     'PipelineStage',
     'ProcessedResult',
-    'RefreshHandler',
     'StatusFlag',
     'TextExtractor',
     'TokenManager',
@@ -46,6 +41,7 @@ __all__ = [
 ]
 
 
+from automate.eserv.config.types import *
 from automate.eserv.errors.types import *
 from automate.eserv.monitor.types import *
 from automate.eserv.util.types import *
@@ -57,9 +53,12 @@ from .structs import *
 if TYPE_CHECKING:
     __all__ += [
         'CredentialType',
+        'DropboxCredential',
         'ErrorDict',
+        'MSALCredential',
         'ProcessStatus',
         'ProcessedResultDict',
+        'SMTPConfig',
     ]
 
     from .typechecking import *

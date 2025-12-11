@@ -122,4 +122,4 @@ def verify(
 
     for key in 'microsoft-outlook', 'dropbox':
         if not query or query in key:
-            eserv.config.credentials[key].show(insecure=insecure, properties=properties)
+            eserv.config.creds[key].print(insecure=insecure, select=properties)

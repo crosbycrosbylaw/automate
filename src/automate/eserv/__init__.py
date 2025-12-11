@@ -1,10 +1,9 @@
 """A file handling automation pipeline for internal use."""
 
 __all__ = [
-    'config_factory',
+    'configure',
     'document_store_factory',
     'download_documents',
-    'dropbox_manager_factory',
     'error_factory',
     'error_tracker_factory',
     'extract_aspnet_form_data',
@@ -16,7 +15,8 @@ __all__ = [
     'folder_matcher_factory',
     'graph_client_factory',
     'index_cache_factory',
-    'msauth_manager_factory',
+    'make_dbx_cred',
+    'make_ms_cred',
     'notifier_factory',
     'processor_factory',
     'record_factory',
@@ -29,8 +29,9 @@ __all__ = [
     'upload_documents',
 ]
 
+from ._module import *
+from .config import *
 from .download import *
-from .enums import *
 from .errors import *
 from .extract import *
 from .monitor import *

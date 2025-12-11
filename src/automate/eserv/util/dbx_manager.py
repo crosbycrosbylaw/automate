@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, cast
 
 from dropbox import Dropbox
 from dropbox.files import FolderMetadata, WriteMode
-from rampy import create_field_factory
 
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
@@ -81,17 +80,16 @@ class DropboxManager(TokenManager[Dropbox]):
             Dropbox client instance.
 
         """
-        if self._client is None:
-            from dropbox import Dropbox
+        if self._client:
+            return self._client
 
-            self._client = Dropbox(
-                oauth2_access_token=self.credential.access_token,
-                oauth2_refresh_token=self.credential.refresh_token,
-                app_key=self.credential.client_id,
-                app_secret=self.credential.client_secret,
-            )
+        from dropbox import Dropbox
 
-        return self._client
+        client = self._client = Dropbox(
+            oauth2_access_token=self.credential.access_token,
+            oauth2_refresh_token=self.credential.refresh_token,
+            app_key=self.credential.client_id,
+            app_secret=self.credential.client_secret,
+        )
 
-
-dropbox_manager_factory = create_field_factory(DropboxManager)
+        return client

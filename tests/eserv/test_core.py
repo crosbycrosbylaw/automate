@@ -559,9 +559,7 @@ class TestPipelineProcess:
             patch('automate.eserv.core.upload_documents') as mock_upload,
         ):
             mock_extract.return_value = self.mock_upload_info()
-            mock_upload.return_value = IntermediaryResult(
-                status=status.ERROR, error='Dropbox API error'
-            )
+            mock_upload.return_value = IntermediaryResult(status=status.ERROR, error='Dropbox API error')
 
             # Initialize pipeline
             pipeline = Pipeline()
@@ -588,9 +586,7 @@ class TestPipelineMonitor:
             patch('automate.eserv.core.processor_factory') as mock_processor_factory,
         ):
             # Mock EmailProcessor.process_batch
-            mock_processor = new_mock_processor(
-                batch_result := {'total': 5, 'succeeded': 4, 'failed': 1}
-            )
+            mock_processor = new_mock_processor(batch_result := {'total': 5, 'succeeded': 4, 'failed': 1})
 
             mock_processor_factory.return_value = mock_processor
 
@@ -694,9 +690,7 @@ class TestPipelineExecute:
         """Test generic exception converted to ProcessedResult with stage info."""
         with (
             mock_core_factory('config', 'state', 'tracker'),
-            patch(
-                'automate.eserv.core.BeautifulSoup', side_effect=RuntimeError('Unexpected error')
-            ),
+            patch('automate.eserv.core.BeautifulSoup', side_effect=RuntimeError('Unexpected error')),
         ):
             # Initialize pipeline
             pipeline = Pipeline()

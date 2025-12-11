@@ -9,9 +9,12 @@ if typing.TYPE_CHECKING:
         'ErrorDict',
         'ProcessStatus',
         'ProcessedResultDict',
+        'SMTPConfig',
     ]
 
     from typing import Any, Literal, NotRequired, ReadOnly, Required, TypedDict, type_check_only
+
+    from .unique import EmailAddress
 
     type CredentialType = Literal['dropbox', 'microsoft-outlook']
     type ProcessStatus = Literal['success', 'error']
@@ -59,3 +62,13 @@ if typing.TYPE_CHECKING:
         issued_at: NotRequired[str | None]
         expires_at: NotRequired[str | None]
         expires_in: NotRequired[int | None]
+
+    @type_check_only
+    class SMTPConfig(TypedDict):
+        server: str
+        port: int
+        sender: EmailAddress
+        recipient: EmailAddress
+        username: str | None
+        password: str | None
+        use_tls: bool

@@ -76,9 +76,7 @@ class EmailState:
 
     def _save(self) -> None:
         """Persist to JSON."""
-        data: dict[str, ProcessedResultDict] = {
-            uid: entry.asdict() for uid, entry in self._entries.items()
-        }
+        data: dict[str, ProcessedResultDict] = {uid: entry.asdict() for uid, entry in self._entries.items()}
 
         self.json_path.parent.mkdir(parents=True, exist_ok=True)
 

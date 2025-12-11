@@ -12,6 +12,6 @@ class MissingVariableError(ValueError):
 class InvalidFormatError(ValueError):
     """Exception raised when an environment variable has an invalid format."""
 
-    def __init__(self, name: str, value: str) -> None:
+    def __init__(self, name: str, value: str, hint: str | None = None) -> None:
         """Initialize the exception with the variable name and invalid value."""
-        super().__init__(f'Invalid {name} format: {value}')
+        super().__init__(f'Invalid {name} format: {value}\n{hint=}')

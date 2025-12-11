@@ -21,7 +21,7 @@ exclude = [
 extend-include = ["*.ipynb"]
 
 indent-width   = 4
-line-length    = 100
+line-length    = 108
 target-version = "py314"
 
 [lint]

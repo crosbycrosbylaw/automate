@@ -123,9 +123,9 @@ class Pipeline:
 
     def __init__(self, dotenv_path: Path | None = None) -> None:
         """Initialize pipeline with configuration."""
-        self.config = config_factory(dotenv_path)
-        self.state = state_tracker_factory(self.config.state.state_file)
-        self.tracker = error_tracker_factory(self.config.paths.service_dir / 'error_log.json')
+        self.config = configure(dotenv_path)
+        self.state = state_tracker_factory(self.config.paths.state)
+        self.tracker = error_tracker_factory(self.config.paths.error_log)
 
     def process(self, record: EmailRecord) -> IntermediaryResult:
         """Process HTML file through complete pipeline.

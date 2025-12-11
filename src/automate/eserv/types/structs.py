@@ -86,10 +86,10 @@ class DownloadInfo:
         return out
 
 
-@dataclass
 @runtime_checkable
+@dataclass
 class TokenManager[T](Protocol):
-    credential: OAuthCredential[Self]
+    credential: OAuthCredential[Self] = field(init=True)
 
     def _refresh_token(self) -> dict[str, Any]: ...
 

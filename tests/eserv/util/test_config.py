@@ -63,29 +63,31 @@ INDEX_CACHE_TTL_HOURS=4
 
 def test_config_from_env(test_env_file):
     """Test Config.from_env() loads all configuration."""
-    config = eserv.config_factory(test_env_file)
+    config = eserv.configure(test_env_file)
+
+    smtp = config.smtp()
 
     # Verify SMTP config
-    assert config.smtp.server == 'smtp.example.com'
-    assert config.smtp.port == 587
-    assert '@' in config.smtp.from_addr
-    assert '@' in config.smtp.to_addr
+    assert smtp['server'] == 'smtp.example.com'
+    assert smtp['port'] == 587
+    assert '@' in smtp['sender']
+    assert '@' in smtp['recipient']
 
     # Verify Dropbox config
-    assert (dropbox_token := config.credentials['dropbox'].access_token)
-    assert len(dropbox_token) > MIN_TOKEN_LENGTH
+    assert (dbx_cred := config.creds['dropbox'])
+    assert len(dbx_cred.access_token) > MIN_TOKEN_LENGTH
 
     # Verify Outlook config
-    assert (outlook_token := config.credentials['microsoft-outlook'].access_token)
-    assert len(outlook_token) > MIN_TOKEN_LENGTH
+    assert (outlook_token := config.creds['microsoft-outlook'])
+    assert len(outlook_token.access_token) > MIN_TOKEN_LENGTH
 
     # Verify paths config
-    assert config.paths.service_dir.exists()
-    assert config.paths.manual_review_folder
+    assert config.paths.service.exists()
+    assert config.manual_review_folder
 
     # Verify cache config
-    assert config.cache.ttl_hours > 0
-    assert config.cache.index_file.parent == config.paths.service_dir
+    assert config.index_max_age > 0
+    assert config.paths.index.parent == config.paths.service
 
     # Verify email state config
-    assert config.state.state_file.parent == config.paths.service_dir
+    assert config.paths.state.parent == config.paths.service

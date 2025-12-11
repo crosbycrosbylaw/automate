@@ -30,7 +30,7 @@ class TestDropboxManagerClient:
 
     def test_lazy_client_initialization_on_first_access(self, mock_credential: Mock) -> None:
         """Test client is created lazily on first access."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         # Verify client not created yet
         assert manager._client is None
@@ -55,7 +55,7 @@ class TestDropboxManagerClient:
 
     def test_client_caching(self, mock_credential: Mock) -> None:
         """Test client is cached after first creation."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         with patch('dropbox.Dropbox') as mock_dropbox_class:
             mock_client = Mock()
@@ -77,7 +77,7 @@ class TestDropboxManagerIndex:
 
     def test_successful_folder_index_fetch(self, mock_credential: Mock) -> None:
         """Test successful folder index fetch without pagination."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         # Mock Dropbox client and files_list_folder response
         mock_client = Mock()
@@ -118,7 +118,7 @@ class TestDropboxManagerIndex:
 
     def test_pagination_handling(self, mock_credential: Mock) -> None:
         """Test pagination with has_more=True."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         # Create mock entries with proper attributes
         from dropbox.files import FolderMetadata
@@ -172,7 +172,7 @@ class TestDropboxManagerUpload:
         mock_document: Path,
     ) -> None:
         """Test successful file upload to Dropbox."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         # Mock Dropbox client
         mock_client = Mock()
@@ -200,7 +200,7 @@ class TestDropboxManagerUpload:
         mock_document: Path,
     ) -> None:
         """Test uploaded files are tracked in list."""
-        manager = dropbox_manager_factory(credential=mock_credential)
+        manager = DropboxManager(credential=mock_credential)
 
         mock_client = Mock()
         mock_client.files_upload.return_value = Mock()
