@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, NewType, overload
+from typing import TYPE_CHECKING, Literal, no_type_check, overload
 
 if TYPE_CHECKING:
-    from automate.eserv.types import ErrorDict
-
-
-StatusFlag = NewType('StatusFlag', dict[Literal['id', 'value'], str])
+    from automate.eserv.types import ErrorDict, StatusFlag
 
 
 @overload
 def status_flag_factory(*, success: Literal[True] = True) -> StatusFlag: ...
 @overload
 def status_flag_factory(error: ErrorDict) -> StatusFlag: ...
+@no_type_check
 def status_flag_factory(
     error: ErrorDict | None = None,
     *,
@@ -31,7 +29,7 @@ def status_flag_factory(
         A `StatusFlag` dictionary with id and value.
 
     """
-    out = StatusFlag({'id': 'String {00020329-0000-0000-C000-000000000046} Name eserv_flag'})
+    out = {'id': 'String {00020329-0000-0000-C000-000000000046} Name eserv_flag'}
 
     if error is None or success is True:
         out['value'] = '$eserv_success'

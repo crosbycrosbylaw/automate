@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ['_CredentialsConfig']
+__all__ = ['CredentialsConfig']
 
 import threading
 from dataclasses import dataclass, field, fields
@@ -16,8 +16,34 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
+def parse_credential_json(
+    data: CredentialsJSON | dict[str, Any],
+) -> tuple[CredentialType, OAuthCredential[Any]]:
+    """Parse fields from token data."""
+    keywords: dict[str, Any] = {}
+
+    keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
+    keywords['properties'] = {key: val for key, val in data.items() if key not in keywords}
+
+    match key := data['type']:
+        case 'dropbox':
+            from automate.eserv._module import make_dbx_cred
+
+            cred = make_dbx_cred(**keywords)
+
+        case 'msal':
+            from automate.eserv._module import make_ms_cred
+
+            cred = make_ms_cred(**keywords)
+
+        case _:
+            cred = OAuthCredential(**keywords)
+
+    return key, cred
+
+
 @dataclass(slots=True, frozen=True)
-class _CredentialsConfig:
+class CredentialsConfig:
     """Manages OAuth credentials for Dropbox and Outlook."""
 
     path: Path = field(metadata={'updated_at': None})
@@ -31,51 +57,42 @@ class _CredentialsConfig:
             data = orjson.loads(f.read())
 
         for json in data:
-            self._parse_credential_json(json)
+            self._mapping.update([parse_credential_json(json)])
+
+    def __setitem__(self, name: CredentialType, value: OAuthCredential[Any]) -> None:
+        self._mapping[name] = value
 
     if TYPE_CHECKING:
 
         @overload
-        def __getitem__(
+        def get(
             self,
-            name: Literal['microsoft-outlook'],
+            name: Literal['msal'],
         ) -> OAuthCredential[MSALManager]: ...
         @overload
-        def __getitem__(
+        def get(
             self,
             name: Literal['dropbox'],
         ) -> OAuthCredential[DropboxManager]: ...
 
-    def __getitem__(self, name: CredentialType) -> ...:
+    def get(self, name: CredentialType) -> OAuthCredential[Any]:
         """Retrieve the named authorization credential, storing the value if not found in cache."""
         with self._lock:
             cred = self._mapping[name]
             return cred if not cred.outdated else self._refresh(cred)
 
-    def _parse_credential_json(self, data: CredentialsJSON | dict[str, Any]) -> None:
-        """Parse fields from token data."""
-        keywords: dict[str, Any] = {}
+    if TYPE_CHECKING:
+        __getitem__ = get
+    else:
 
-        keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
-        keywords['properties'] = {key: val for key, val in data.items() if key not in keywords}
+        def __getitem__(self, name: ...) -> ...:
+            """Retrieve the named OAuth2 credential directly from the cache."""
+            return self._mapping[name]
 
-        match key := data['type']:
-            case 'dropbox':
-                from automate.eserv._module import make_dbx_cred
-
-                cred = make_dbx_cred(**keywords)
-            case 'microsoft-outlook':
-                from automate.eserv._module import make_ms_cred
-
-                cred = make_ms_cred(**keywords)
-            case _:
-                cred = OAuthCredential(**keywords)
-
-        with self._lock:
-            self._mapping[key] = cred
+    __getattr__ = get
 
     @staticmethod
-    def _is_expired(cred: OAuthCredential) -> bool:
+    def is_expired(cred: OAuthCredential) -> bool:
         """Check if credential needs refresh."""
         return cred.outdated
 
@@ -89,7 +106,7 @@ class _CredentialsConfig:
         """
         refreshed = cred.refresh()
 
-        if cred.type == 'microsoft-outlook':
+        if cred.type == 'msal':
             refreshed.properties.setdefault('msal_migrated', True)
 
         self._mapping[cred.type] = refreshed

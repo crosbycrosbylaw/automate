@@ -124,8 +124,8 @@ class Pipeline:
     def __init__(self, dotenv_path: Path | None = None) -> None:
         """Initialize pipeline with configuration."""
         self.config = configure(dotenv_path)
-        self.state = state_tracker_factory(self.config.paths.state)
-        self.tracker = error_tracker_factory(self.config.paths.error_log)
+        self.state = get_state_tracker(self.config.paths.state)
+        self.tracker = get_error_tracker(self.config.paths.error_log)
 
     def process(self, record: EmailRecord) -> IntermediaryResult:
         """Process HTML file through complete pipeline.
@@ -187,7 +187,7 @@ class Pipeline:
         """
         self.tracker.clear_old_errors(days=30)
 
-        batch_result = await processor_factory(self).process_batch(num_days)
+        batch_result = await get_record_processor(self).process_batch(num_days)
 
         for err in batch_result.summarize().get('error', ()):
             if inner := err.get('error'):
@@ -218,15 +218,15 @@ class Pipeline:
         """
         try:
             if self.process(rec).status != status.ERROR:
-                return result_factory(record=rec)
+                return process_pipeline_result(record=rec)
         except PipelineError as exc:
-            return result_factory(record=rec, error=exc.entry())
+            return process_pipeline_result(record=rec, error=exc.entry())
         except Exception as exc:
             error = PipelineError.from_exc(exc, uid=rec.uid, stage=self.stage)
         else:
             error = self.tracker.prev_error
 
-        return result_factory(record=rec, error=error)
+        return process_pipeline_result(record=rec, error=error)
 
 
 setup_eserv = create_field_factory(Pipeline)

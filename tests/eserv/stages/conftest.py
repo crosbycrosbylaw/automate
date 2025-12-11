@@ -103,10 +103,10 @@ class UploadDocumentSubtestFixture(test.subtestfix):
     def context(self) -> Generator[Any]:
         try:
             with (
-                patch('automate.eserv.upload.index_cache_factory', return_value=self.mock_cache),
-                patch('automate.eserv.upload.folder_matcher_factory', return_value=self.mock_matcher),
+                patch('automate.eserv.upload.get_dbx_index_cache', return_value=self.mock_cache),
+                patch('automate.eserv.upload.get_dbx_folder_matcher', return_value=self.mock_matcher),
                 patch('automate.eserv.upload.DropboxManager', return_value=self.mock_dbx),
-                patch('automate.eserv.upload.notifier_factory', return_value=self.mock_notifier),
+                patch('automate.eserv.upload.get_notifier', return_value=self.mock_notifier),
             ):
                 yield
         finally:

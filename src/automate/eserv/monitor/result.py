@@ -14,26 +14,26 @@ if TYPE_CHECKING:
 
 
 @overload
-def result_factory(
+def process_pipeline_result(
     *,
     record: EmailInfo | None,
     error: PipelineError | ErrorDict | None = None,
 ) -> ProcessedResult: ...
 @overload
-def result_factory(entry: ProcessedResultDict, /) -> ProcessedResult: ...
-def result_factory(
+def process_pipeline_result(entry: ProcessedResultDict, /) -> ProcessedResult: ...
+def process_pipeline_result(
     entry: ProcessedResultDict | None = None,
     *,
     record: EmailInfo | None = None,
     error: PipelineError | ErrorDict | None = None,
 ) -> ProcessedResult:
     """Create a ProcessedResult instance."""
-    from automate.eserv.record import record_factory
     from automate.eserv.types import ProcessedResult
+    from automate.eserv.util.email_record import make_email_record
 
     if entry is not None:
         return ProcessedResult(
-            record=record_factory(
+            record=make_email_record(
                 uid=entry['uid'],
                 sender=entry['sender'],
                 subject=entry['subject'],

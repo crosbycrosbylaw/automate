@@ -1,19 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
-
-from kiota_abstractions.base_request_configuration import RequestConfiguration
-
-if TYPE_CHECKING:
-    from msgraph.generated.models.mail_folder import MailFolder
-
-    from .client import GraphClient
-
-
 import threading
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.message import Message
 from msgraph.generated.models.single_value_legacy_extended_property import (
     SingleValueLegacyExtendedProperty,
@@ -21,14 +12,14 @@ from msgraph.generated.models.single_value_legacy_extended_property import (
 from msgraph.graph_service_client import GraphServiceClient
 from rampy import create_field_factory
 
-from automate.eserv.record import record_factory
+from automate.eserv.util.email_record import make_email_record
 
 if TYPE_CHECKING:
-    from automate.eserv.types import (
-        Config,
-        EmailRecord,
-        StatusFlag,
-    )
+    from msgraph.generated.models.mail_folder import MailFolder
+
+    from automate.eserv.types import Config, EmailRecord, StatusFlag
+
+    from .client import GraphClient
 
 
 class GraphClient:
@@ -38,7 +29,7 @@ class GraphClient:
         """Initialize a Microsoft Graph client."""
         self.config = config
 
-        self.cred = config.credentials['microsoft-outlook']
+        self.cred = config.creds.msal
         self.token = self.cred.manager.get_token()
 
         self._folder_id_cache: dict[str, str] = {}
@@ -63,7 +54,7 @@ class GraphClient:
             if 'monitoring' in self._folder_id_cache:
                 return self._folder_id_cache['monitoring']
 
-        segments = [part.strip() for part in self.config.monitoring.folder_path.split(',')]
+        segments = [part.strip() for part in self.config.monitor_mail_folder_path]
         inbox_name = segments.pop(0)
 
         print(segments)
@@ -92,9 +83,7 @@ class GraphClient:
                 )
 
                 if collection_response and collection_response.value:
-                    current_id, current_folder = verify_folder(
-                        next(iter(collection_response.value))
-                    )
+                    current_id, current_folder = verify_folder(next(iter(collection_response.value)))
                 else:
                     raise ValueError(current_id)
 
@@ -161,13 +150,11 @@ class GraphClient:
                 )
 
                 content = body_result and body_result.body and body_result.body.content
-                sender = (
-                    item.from_ and item.from_.email_address and item.from_.email_address.address
-                )
+                sender = item.from_ and item.from_.email_address and item.from_.email_address.address
 
                 if content is not None:
                     records.append(
-                        record_factory(
+                        make_email_record(
                             uid=item.id,
                             sender=sender or '',
                             subject=item.subject or '',
@@ -191,13 +178,10 @@ class GraphClient:
             await self.service.me.messages.by_message_id(email_uid).patch(
                 Message(
                     single_value_extended_properties=[
-                        SingleValueLegacyExtendedProperty(
-                            odata_type=flag['id'],
-                            value=flag['value'],
-                        )
+                        SingleValueLegacyExtendedProperty(**flag),
                     ]
                 )
             )
 
 
-graph_client_factory = create_field_factory(GraphClient)
+make_graph_client = create_field_factory(GraphClient)

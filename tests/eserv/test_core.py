@@ -61,9 +61,9 @@ def _resolve_dependency_name(key: CoreDependency) -> str:
         case 'config':
             return 'config_factory'
         case 'state':
-            return 'state_tracker_factory'
+            return 'get_state_tracker'
         case 'tracker':
-            return 'error_tracker_factory'
+            return 'get_error_tracker'
         case _:
             raise ValueError(key)
 
@@ -134,9 +134,9 @@ def mock_dependencies(directory) -> dict[str, Mock]:
 @pytest.fixture
 def sample_email_record():
     """Create sample EmailRecord for testing."""
-    from automate.eserv import record_factory
+    from automate.eserv import make_email_record
 
-    return record_factory(
+    return make_email_record(
         uid='email-123',
         sender='court@example.com',
         subject='Smith v. Jones - Filing Accepted',
@@ -583,18 +583,18 @@ class TestPipelineMonitor:
         """Test monitor delegates to EmailProcessor."""
         with (
             mock_core_factory('config', 'state', 'tracker'),
-            patch('automate.eserv.core.processor_factory') as mock_processor_factory,
+            patch('automate.eserv.core.get_record_processor') as mock_get_record_processor,
         ):
             # Mock EmailProcessor.process_batch
             mock_processor = new_mock_processor(batch_result := {'total': 5, 'succeeded': 4, 'failed': 1})
 
-            mock_processor_factory.return_value = mock_processor
+            mock_get_record_processor.return_value = mock_processor
 
             # Initialize pipeline and monitor
             result = await (pipeline := Pipeline()).monitor(num_days=1)
 
             # Verify EmailProcessor created with pipeline
-            mock_processor_factory.assert_called_once_with(pipeline)
+            mock_get_record_processor.assert_called_once_with(pipeline)
 
             # Verify process_batch called
             mock_processor.process_batch.assert_called_once_with(1)
@@ -612,10 +612,10 @@ class TestPipelineMonitor:
         """Test error log cleanup called before monitoring."""
         with (
             mock_core_factory('config', 'state', 'tracker'),
-            patch('automate.eserv.core.processor_factory') as mock_processor_factory,
+            patch('automate.eserv.core.get_record_processor') as mock_get_record_processor,
         ):
             mock_processor = new_mock_processor()
-            mock_processor_factory.return_value = mock_processor
+            mock_get_record_processor.return_value = mock_processor
 
             # Initialize pipeline and monitor
             pipeline = Pipeline()

@@ -166,4 +166,4 @@ Error: {error}
         self._send_email(subject, body)
 
 
-notifier_factory = create_field_factory(Notifier)
+get_notifier = create_field_factory(Notifier)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ['ev_email_factory', 'ev_factory', 'ev_int_factory', 'hint']
+__all__ = ['email_env_var', 'env_var', 'hint', 'int_env_var']
 
 import os
 import re
@@ -25,19 +25,19 @@ hint = create_field_factory(ValidationHint)
 
 
 @overload
-def ev_factory[T = str](
+def env_var[T = str](
     key: str,
     *,
     into: Callable[[str], T] = str,
     optional: Literal[True],
 ) -> Callable[[], T | None]: ...
 @overload
-def ev_factory[T = str](
+def env_var[T = str](
     key: str,
     default: str | None = None,
     into: Callable[[str], T | ValidationHint] = str,
 ) -> Callable[[], T]: ...
-def ev_factory[T = str](
+def env_var[T = str](
     key: str,
     default: str | None = None,
     into: Callable[[str], T | ValidationHint] = str,
@@ -64,7 +64,7 @@ def ev_factory[T = str](
     return _factory
 
 
-def ev_int_factory(key: str, default: int | None = None):
+def int_env_var(key: str, default: int | None = None):
 
     def _into(s: str):
         try:
@@ -72,10 +72,10 @@ def ev_int_factory(key: str, default: int | None = None):
         except ValueError:
             return hint('expected an integer')
 
-    return ev_factory(key, default=None if not isinstance(default, int) else str(default), into=_into)
+    return env_var(key, default=None if not isinstance(default, int) else str(default), into=_into)
 
 
-def ev_email_factory(key: str):
+def email_env_var(key: str):
     pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
     into = lambda s: EmailAddress(s) if pattern.match(s) else hint('expected valid email address')
-    return ev_factory(key, into=into)
+    return env_var(key, into=into)

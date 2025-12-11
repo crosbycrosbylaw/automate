@@ -17,9 +17,9 @@ if typing.TYPE_CHECKING:
 
 @pytest.fixture
 def record() -> EmailRecord:
-    from automate.eserv.record import record_factory
+    from automate.eserv.util.email_record import make_email_record
 
-    return record_factory(SAMPLE_EMAIL)
+    return make_email_record(SAMPLE_EMAIL)
 
 
 @fixture_class(name='setup_files')

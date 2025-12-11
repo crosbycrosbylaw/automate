@@ -12,7 +12,6 @@ __all__ = [
     'Notifier',
     'OAuthCredential',
     'PartyExtractor',
-    'TextExtractor',
 ]
 
 
@@ -23,7 +22,6 @@ from .index_cache import IndexCache
 from .msal_manager import MSALManager
 from .notifications import NotificationConfig, Notifier
 from .oauth_manager import OAuthCredential
-from .pdf_utils import TextExtractor
 from .target_finder import CaseMatch, FolderMatcher, PartyExtractor
 
 type MSALCredential = OAuthCredential[MSALManager]

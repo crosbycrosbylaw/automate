@@ -43,9 +43,9 @@ class EmailProcessor:
         try:
             batch = await self.client.fetch_unprocessed_emails(num_days, self.state.processed)
         except HTTPError as e:
-            from automate.eserv import error_factory, result_factory, stage
+            from automate.eserv import error_factory, process_pipeline_result, stage
 
-            processed_result = result_factory(
+            processed_result = process_pipeline_result(
                 record=None,
                 error=error_factory(
                     stage=stage.INITIALIZATION,
@@ -82,4 +82,4 @@ class EmailProcessor:
         return status_flag_factory(result.error)
 
 
-processor_factory = create_field_factory(EmailProcessor)
+get_record_processor = create_field_factory(EmailProcessor)

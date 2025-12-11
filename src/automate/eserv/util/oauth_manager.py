@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from operator import methodcaller
 from typing import TYPE_CHECKING, Any, Self
 
+from azure.core.credentials import AccessToken
 from rampy import create_field_factory
 
 if TYPE_CHECKING:
@@ -53,10 +54,17 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
 
     @property
     def outdated(self) -> bool:
-        return datetime.now(UTC) > (self._resolve_expiration() - timedelta(minutes=5))
+        return datetime.now(UTC) > (self.expiration() - timedelta(minutes=5))
+
+    def expiration(self) -> datetime:
+        if not isinstance(self.expires_at, datetime):
+            self.expires_at = self._resolve_expiration()
+
+        return self.expires_at
 
     def __post_init__(self, factory: Callable[[Self], T]) -> None:
         self.manager = factory(self)
+        self.expires_at = self._resolve_expiration()
 
     def __getitem__(self, name: str) -> Any:
         return self.properties[name]
@@ -73,6 +81,13 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
     def __str__(self) -> str:
         """Return the access token as string representation."""
         return self.access_token
+
+    def __int__(self) -> int:
+        """Return the expiration datetime as a UNIX timestamp."""
+        return int(self._resolve_expiration().timestamp())
+
+    def __call__(self) -> AccessToken:
+        return AccessToken(str(self), int(self))
 
     def print(
         self,
@@ -157,4 +172,4 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
         return self.reconstruct(data)
 
 
-credential_factory = create_field_factory(OAuthCredential)
+make_oauth_credential = create_field_factory(OAuthCredential)

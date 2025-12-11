@@ -149,4 +149,4 @@ class IndexCache:
         return [*self._index.keys()]
 
 
-index_cache_factory = create_field_factory(IndexCache)
+get_dbx_index_cache = create_field_factory(IndexCache)

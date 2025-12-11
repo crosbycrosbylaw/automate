@@ -1,9 +1,11 @@
 from typing import TYPE_CHECKING
 
 __all__ = [
+    'BaseFields',
     'BatchResult',
     'CaseMatch',
     'Config',
+    'CredentialsConfig',
     'CredentialsJSON',
     'DocumentDownloadError',
     'DocumentExtractionError',
@@ -25,19 +27,22 @@ __all__ = [
     'InvalidFormatError',
     'MSALManager',
     'MissingVariableError',
+    'MonitoringFields',
     'NotificationConfig',
     'Notifier',
     'OAuthCredential',
     'PartialEmailRecord',
     'PartyExtractor',
+    'PathsConfig',
     'PipelineError',
     'PipelineStage',
     'ProcessedResult',
+    'SMTPFields',
     'StatusFlag',
-    'TextExtractor',
     'TokenManager',
     'UploadInfo',
     'UploadStatus',
+    'ValidationHint',
 ]
 
 

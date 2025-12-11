@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, overload
 import orjson
 from rampy.util import create_field_factory
 
-from automate.eserv.monitor.result import result_factory
+from automate.eserv.monitor.result import process_pipeline_result
 from automate.eserv.types.results import ProcessedResult
 from setup_console import console
 
@@ -42,7 +42,7 @@ class EmailState:
             with self.json_path.open('rb') as f:
                 data: dict[str, ProcessedResultDict] = orjson.loads(f.read())
 
-            self._entries = {uid: result_factory(entry) for uid, entry in data.items()}
+            self._entries = {uid: process_pipeline_result(entry) for uid, entry in data.items()}
         except Exception:
             console.exception('EmailState loading')
             self._entries = {}
@@ -61,7 +61,7 @@ class EmailState:
             if arg.record is not None:
                 self._entries[arg.record.uid] = arg
         else:
-            self._entries[arg.uid] = result_factory(record=arg, error=error)
+            self._entries[arg.uid] = process_pipeline_result(record=arg, error=error)
 
         self._save()
 
@@ -84,4 +84,4 @@ class EmailState:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
-state_tracker_factory = create_field_factory(EmailState)
+get_state_tracker = create_field_factory(EmailState)

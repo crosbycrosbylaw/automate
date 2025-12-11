@@ -69,13 +69,11 @@ class TestUploadWorkflow:
         state_file = temp / 'email_state.json'
         cache_file = temp / 'dbx_index.json'
 
-        email_state = eserv.state_tracker_factory(state_file)
-        index_cache = eserv.index_cache_factory(cache_file, ttl_hours=4)
+        email_state = eserv.get_state_tracker(state_file)
+        index_cache = eserv.get_dbx_index_cache(cache_file, ttl_hours=4)
 
         # Populate cache with folders
-        index_cache.refresh({
-            folder: {'id': f'id_{i}', 'name': folder} for i, folder in enumerate(folders)
-        })
+        index_cache.refresh({folder: {'id': f'id_{i}', 'name': folder} for i, folder in enumerate(folders)})
 
         # Simulate duplicate email if requested
         if is_duplicate:
@@ -123,7 +121,7 @@ def test_config_initialization(tmp_path: Path):
             "refresh_token": "refresh_token"
         },
         {
-            "type": "microsoft-outlook",
+            "type": "msal",
             "account": "test",
             "client_id": "test_client",
             "client_secret": "test_secret",
@@ -154,7 +152,7 @@ MANUAL_REVIEW_FOLDER=/Manual Review
 
     # Verify all components are configured
     assert config.smtp.server
-    assert config.credentials['dropbox']
-    assert config.credentials['microsoft-outlook']
+    assert config.credentials.dropbox
+    assert config.credentials.msal
     assert config.paths.service_dir.exists()
     assert config.cache.ttl_hours > 0

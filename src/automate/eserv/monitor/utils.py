@@ -34,7 +34,7 @@ def get_token(graph_client: GraphClient):
         result['expires_at'] = expires_at
         ms_cred = ms_cred.reconstruct(result)
 
-        graph_client.config.credentials.persist({'microsoft-outlook': ms_cred})
+        graph_client.config.credentials.persist({'msal': ms_cred})
 
         return ms_cred.token
 

@@ -310,4 +310,4 @@ class ErrorTracker:
         console.bind(cutoff_days=days).info('Cleared old errors')
 
 
-error_tracker_factory = create_field_factory(ErrorTracker)
+get_error_tracker = create_field_factory(ErrorTracker)

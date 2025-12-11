@@ -14,9 +14,9 @@ if typing.TYPE_CHECKING:
 
     from typing import Any, Literal, NotRequired, ReadOnly, Required, TypedDict, type_check_only
 
-    from .unique import EmailAddress
+    from automate.eserv.config.types import EmailAddress
 
-    type CredentialType = Literal['dropbox', 'microsoft-outlook']
+    type CredentialType = Literal['dropbox', 'msal']
     type ProcessStatus = Literal['success', 'error']
 
     @type_check_only

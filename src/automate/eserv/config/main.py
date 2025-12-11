@@ -19,9 +19,9 @@ from setup_console import console
 
 @dataclass(frozen=True, slots=True)
 class Config(
-    _MonitoringFields,
-    _SMTPFields,
-    _BaseFields,
+    MonitoringFields,
+    SMTPFields,
+    BaseFields,
 ):
     """Root configuration with all nested scopes.
 
@@ -34,13 +34,13 @@ class Config(
 
     """
 
-    paths: _PathsConfig = field(init=False)
-    creds: _CredentialsConfig = field(init=False)
+    paths: PathsConfig = field(init=False)
+    creds: CredentialsConfig = field(init=False)
 
     def __new__(cls, dotenv_path: PathLike[str] | None = None) -> Config:
         config = super().__new__(cls)
-        object.__setattr__(config, 'paths', (paths := _PathsConfig(dotenv_path=dotenv_path)))
-        object.__setattr__(config, 'creds', _CredentialsConfig(paths.credentials))
+        object.__setattr__(config, 'paths', (paths := PathsConfig(dotenv_path=dotenv_path)))
+        object.__setattr__(config, 'creds', CredentialsConfig(paths.credentials))
         return config
 
     def __post_init__(self) -> None:

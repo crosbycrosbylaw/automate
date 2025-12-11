@@ -28,9 +28,9 @@ from automate.eserv._module import stage, status
 from automate.eserv.types.results import IntermediaryResult
 from automate.eserv.util import (
     DropboxManager,
-    folder_matcher_factory,
-    index_cache_factory,
-    notifier_factory,
+    get_dbx_folder_matcher,
+    get_dbx_index_cache,
+    get_notifier,
 )
 from setup_console import console
 
@@ -66,8 +66,8 @@ def upload_documents(
         console.warning('There are no documents to upload.')
         return IntermediaryResult(status=status.NO_WORK)
 
-    dbx = DropboxManager(config.credentials['dropbox'])
-    cache = index_cache_factory(config.cache.index_file, ttl_hours=4)
+    dbx = DropboxManager(config.credentials.dropbox)
+    cache = get_dbx_index_cache(config.cache.index_file, ttl_hours=4)
 
     if cache.is_stale():
         try:
@@ -76,11 +76,11 @@ def upload_documents(
         except ApiError as e:
             return IntermediaryResult(status.ERROR, error=f'Failed to refresh Dropbox index: {e!s}')
 
-    notifier = notifier_factory(config.smtp)
+    notifier = get_notifier(config.smtp)
 
     if (
         match := case_name.capitalize() != 'Unknown'
-        and (matcher := folder_matcher_factory(cache.get_all_paths(), min_score))
+        and (matcher := get_dbx_folder_matcher(cache.get_all_paths(), min_score))
         and matcher.find_best_match(case_name)
     ):
         target = match.folder_path

@@ -109,7 +109,7 @@ pixi run push
 
 **Credential Management (`util/oauth_manager.py`):**
 
--   **`CredentialManager`** - Dual-mode OAuth2 token management for Dropbox + Outlook
+-   **`CredentialsConfig`** - Dual-mode OAuth2 token management for Dropbox + Outlook
     -   Dropbox: Manual OAuth2 refresh using `requests.post()`
     -   Outlook: MSAL-powered refresh with automatic token caching
     -   Lazy token refresh (within 5 min of expiry)
@@ -234,6 +234,7 @@ pixi run push
 **Test results:** All 142 tests passing (was 20 failing, now 0)
 
 **Benefits:**
+
 -   Complete test coverage for OAuth credential management
 -   MSAL integration properly tested with migration scenarios
 -   Scope filtering prevents runtime errors with Microsoft Graph API
@@ -245,7 +246,7 @@ pixi run push
 
 **Changes:**
 
--   **Dual-mode credential system** - Unified CredentialManager now supports both manual OAuth2 (Dropbox) and MSAL-powered refresh (Outlook)
+-   **Dual-mode credential system** - Unified CredentialsConfig now supports both manual OAuth2 (Dropbox) and MSAL-powered refresh (Outlook)
 -   **MSAL integration** - Added `msal_app` field to OAuthCredential for storing ConfidentialClientApplication instance
 -   **Automatic migration** - Existing refresh tokens automatically migrated on first refresh via `acquire_token_by_refresh_token()`
 -   **Silent refresh** - Post-migration refreshes use `acquire_token_silent()` with MSAL's account cache
@@ -354,7 +355,7 @@ pixi run push
 
 -   **Unified refresh mechanism** - Single `requests.post()` pattern for both Dropbox and Outlook (removed 50-line RefreshConfig class)
 -   **Removed redundant client storage** - OAuthCredential is now a pure data container; DropboxManager owns client instances
--   **Eliminated double refresh** - Removed unnecessary refresh() call in DropboxManager; trust CredentialManager's expiry logic
+-   **Eliminated double refresh** - Removed unnecessary refresh() call in DropboxManager; trust CredentialsConfig's expiry logic
 -   **Immutable credential updates** - `update_from_refresh()` uses dataclass `replace()` for clean, predictable state changes
 -   **Flat JSON serialization** - Simplified credentials.json format (no nested 'client' or 'data' dicts)
 -   **Migration tooling** - `scripts/migrate_credentials.py` automates conversion from old to new format
@@ -386,7 +387,7 @@ pixi run push
 -   **Test expectations aligned** - Updated test_extract_download_info.py to expect `'untitled'` fallback for missing filenames (not empty string)
 -   **Mock enhancements** - Enhanced test_core.py mock_error() to create error entries for ALL error types with proper `stage.value` serialization
 -   **Download test fixes** - Added `store_path` attributes to mock objects and fixed fallback filename expectation (`'untitled_1'` not `'attachment_1'`)
--   **Source code fix** - Added `exist_ok=True` to document_store_factory to prevent FileExistsError when multiple tests use same lead_name
+-   **Source code fix** - Added `exist_ok=True` to get_doc_store to prevent FileExistsError when multiple tests use same lead_name
 
 **Result:** All 131 tests passing with 0 failures, 0 skipped, 0 errors.
 
@@ -466,7 +467,7 @@ INDEX_CACHE_TTL_HOURS=4
         "expires_at": "2025-12-01T12:00:00+00:00"
     },
     {
-        "type": "microsoft-outlook",
+        "type": "msal",
         "account": "eservice",
         "client_id": "...",
         "client_secret": "...",

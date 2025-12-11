@@ -31,7 +31,7 @@ def test_env_file(tmp_path: Path):
             "refresh_token": "refresh_token"
         },
         {
-            "type": "microsoft-outlook",
+            "type": "msal",
             "account": "test",
             "client_id": "test_client",
             "client_secret": "test_secret",
@@ -74,11 +74,11 @@ def test_config_from_env(test_env_file):
     assert '@' in smtp['recipient']
 
     # Verify Dropbox config
-    assert (dbx_cred := config.creds['dropbox'])
+    assert (dbx_cred := config.creds.dropbox)
     assert len(dbx_cred.access_token) > MIN_TOKEN_LENGTH
 
     # Verify Outlook config
-    assert (outlook_token := config.creds['microsoft-outlook'])
+    assert (outlook_token := config.creds.msal)
     assert len(outlook_token.access_token) > MIN_TOKEN_LENGTH
 
     # Verify paths config

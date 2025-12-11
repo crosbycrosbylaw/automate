@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 import pytest
 from requests.exceptions import HTTPError
 
-from automate.eserv.monitor.client import graph_client_factory
+from automate.eserv.monitor.client import make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
 
@@ -48,7 +48,7 @@ def mock_config() -> Mock:
 @pytest.fixture
 def graph_client(mock_credential: Mock, mock_config: Mock) -> GraphClient:
     """Create GraphClient instance for testing."""
-    return graph_client_factory(config=mock_config)
+    return make_graph_client(config=mock_config)
 
 
 class TestFilterExpression:
@@ -128,9 +128,7 @@ class TestPagination:
         # Mock first page response with nextLink
         page1_response = Mock()
         page1_response.status_code = 200
-        page1_response.text = (
-            '{"value": [{"id": "msg1"}], "@odata.nextLink": "https://next-page-url"}'
-        )
+        page1_response.text = '{"value": [{"id": "msg1"}], "@odata.nextLink": "https://next-page-url"}'
         page1_response.json.return_value = {
             'value': [
                 {

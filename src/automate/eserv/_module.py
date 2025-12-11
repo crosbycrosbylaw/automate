@@ -12,7 +12,7 @@ from automate.eserv.util.msal_manager import MSALManager
 from automate.eserv.util.oauth_manager import OAuthCredential
 
 DropboxCredential = partial(OAuthCredential[DropboxManager], factory=DropboxManager, type='dropbox')
-MSALCredential = partial(OAuthCredential[MSALManager], factory=MSALManager, type='microsoft-outlook')
+MSALCredential = partial(OAuthCredential[MSALManager], factory=MSALManager, type='msal')
 
 make_dbx_cred = create_field_factory(DropboxCredential)
 make_ms_cred = create_field_factory(MSALCredential)

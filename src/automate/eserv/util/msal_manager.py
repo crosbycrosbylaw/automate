@@ -7,13 +7,17 @@ from datetime import UTC, datetime, timedelta
 from functools import cache
 from pathlib import Path
 from types import new_class
-from typing import Any, ClassVar, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 
-from azure.core.credentials import AccessToken, TokenCredential
+from azure.core.credentials import TokenCredential
 from msal import ConfidentialClientApplication
+from rampy import create_field_factory
 
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
+
+if TYPE_CHECKING:
+    from azure.core.credentials import AccessToken
 
 
 def _raise_dynamic_exception(token_data: dict[str, Any]) -> NoReturn:
@@ -249,11 +253,7 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
         })
 
     def get_token(self, *_: ..., **__: ...) -> AccessToken:
-        expiration = self.credential.expires_at
+        return self.credential()
 
-        self.credential = self.credential.refresh()
 
-        if exp := self.credential.expires_at or expiration:
-            return AccessToken(str(self.credential), int(exp.timestamp()))
-
-        raise ValueError(self.credential)
+make_msal_manager = create_field_factory(MSALManager)

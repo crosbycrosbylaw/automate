@@ -73,9 +73,9 @@ class DownloadInfo:
     store_path: Path = field(init=False)
 
     def __post_init__(self) -> None:
-        from automate.eserv import document_store_factory
+        from automate.eserv import get_doc_store
 
-        self.store_path = document_store_factory(self.lead_name)
+        self.store_path = get_doc_store(self.lead_name)
 
     def unpack(self) -> tuple[str, str, Path]:
         return astuple(self)

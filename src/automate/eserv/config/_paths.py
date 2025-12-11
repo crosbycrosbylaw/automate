@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ['_PathsConfig']
+__all__ = ['PathsConfig']
 
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from dotenv import load_dotenv
 
-from automate.eserv.config.utils import ev_factory, hint
+from automate.eserv.config.utils import env_var, hint
 
 if TYPE_CHECKING:
     from os import PathLike
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True, frozen=True)
-class _PathsConfig:
+class PathsConfig:
     """File storage paths."""
 
     _status: ClassVar[bool | None] = None
@@ -29,7 +29,7 @@ class _PathsConfig:
 
     dotenv_path: InitVar[PathLike[str] | None]
 
-    def __new__(cls, dotenv: PathLike[str] | None = None) -> _PathsConfig:
+    def __new__(cls, dotenv: PathLike[str] | None = None) -> PathsConfig:
         cls._status = load_dotenv(dotenv, override=bool(dotenv))
         config = super().__new__(cls)
         if dotenv is not None:
@@ -38,7 +38,7 @@ class _PathsConfig:
 
     root: Path = field(
         init=False,
-        default_factory=ev_factory(
+        default_factory=env_var(
             key='PROJECT_ROOT',
             into=lambda s: hint('expected an existing directory')
             if not (path := Path(s).resolve()).exists()
@@ -48,19 +48,19 @@ class _PathsConfig:
 
     _service: str = field(
         init=False,
-        default_factory=ev_factory(key='SERVICE_DIR', default='.service'),
+        default_factory=env_var(key='SERVICE_DIR', default='.service'),
     )
     _credentials: str = field(
         init=False,
-        default_factory=ev_factory(key='CREDENTIALS_FILE', default='credentials.json'),
+        default_factory=env_var(key='CREDENTIALS_FILE', default='credentials.json'),
     )
     _state: str = field(
         init=False,
-        default_factory=ev_factory(key='STATE_FILE', default='state.json'),
+        default_factory=env_var(key='STATE_FILE', default='state.json'),
     )
     _index: str = field(
         init=False,
-        default_factory=ev_factory(key='INDEX_FILE', default='index.json'),
+        default_factory=env_var(key='INDEX_FILE', default='index.json'),
     )
 
     @cached_property

@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from automate.eserv.record import record_factory
-from automate.eserv.util import state_tracker_factory
+from automate.eserv.util import get_state_tracker
+from automate.eserv.util.email_record import make_email_record
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 def create_test_record(uid: str, subject: str) -> EmailRecord:
     """Create test EmailRecord."""
-    return record_factory(
+    return make_email_record(
         uid=uid,
         sender='court@example.com',
         subject=subject,
@@ -31,14 +31,14 @@ class TestEmailStateBasic:
     def test_unprocessed_uid_returns_false(self, directory: Path) -> None:
         """Test is_processed returns False for unprocessed UID."""
         state_file = directory / 'email_state.json'
-        state = state_tracker_factory(state_file)
+        state = get_state_tracker(state_file)
 
         assert not state.is_processed('basic-test-789')
 
     def test_mark_and_check_processed(self, directory: Path) -> None:
         """Test marking UID as processed and checking status."""
         state_file = directory / 'email_state.json'
-        state = state_tracker_factory(state_file)
+        state = get_state_tracker(state_file)
 
         record = create_test_record('basic-test-789', 'Test Case')
         state.record(record)
@@ -53,7 +53,7 @@ class TestEmailStateDuplicates:
     def test_duplicate_recording_idempotent(self, directory: Path) -> None:
         """Test recording same UID twice is idempotent."""
         state_file = directory / 'email_state.json'
-        state = state_tracker_factory(state_file)
+        state = get_state_tracker(state_file)
 
         record = create_test_record('duplicate-test-456', 'Duplicate Test')
 
@@ -74,12 +74,12 @@ class TestEmailStatePersistence:
         state_file = directory / 'email_state.json'
 
         # Create first instance and record email
-        state1 = state_tracker_factory(state_file)
+        state1 = get_state_tracker(state_file)
         record = create_test_record('test-uid-123', 'Persist Test')
         state1.record(record)
 
         # Create new instance and verify persistence
-        state2 = state_tracker_factory(state_file)
+        state2 = get_state_tracker(state_file)
         assert state2.is_processed('test-uid-123')
         assert 'test-uid-123' in state2.processed
 
@@ -90,7 +90,7 @@ class TestEmailStateClearFlags:
     def test_clear_flags_removes_uid(self, directory: Path) -> None:
         """Test clear_flags removes UID from processed set."""
         state_file = directory / 'email_state.json'
-        state = state_tracker_factory(state_file)
+        state = get_state_tracker(state_file)
 
         # Record email
         record = create_test_record('clear-test-123', 'Test Case')
@@ -107,19 +107,19 @@ class TestEmailStateClearFlags:
         state_file = directory / 'email_state.json'
 
         # Record and clear in first instance
-        state1 = state_tracker_factory(state_file)
+        state1 = get_state_tracker(state_file)
         record = create_test_record('persist-clear-456', 'Test Case')
         state1.record(record)
         state1.clear_flags('persist-clear-456')
 
         # Verify removal persists in new instance
-        state2 = state_tracker_factory(state_file)
+        state2 = get_state_tracker(state_file)
         assert not state2.is_processed('persist-clear-456')
 
     def test_clear_flags_nonexistent_uid_is_noop(self, directory: Path) -> None:
         """Test clear_flags with nonexistent UID does not raise error."""
         state_file = directory / 'email_state.json'
-        state = state_tracker_factory(state_file)
+        state = get_state_tracker(state_file)
 
         # Should not raise exception
         state.clear_flags('nonexistent-uid-789')

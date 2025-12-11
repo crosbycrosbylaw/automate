@@ -37,7 +37,7 @@ def process(
     from typing import TYPE_CHECKING
 
     from automate.eserv.core import setup_eserv
-    from automate.eserv.record import record_factory
+    from automate.eserv.util.email_record import make_email_record
 
     if TYPE_CHECKING:
         from typing import Any
@@ -61,7 +61,7 @@ def process(
 
         kwds['received_at'] = datetime.fromisoformat(received)
 
-    setup_eserv(dotenv_path).execute(record_factory(body, **kwds))
+    setup_eserv(dotenv_path).execute(make_email_record(body, **kwds))
 
 
 async def monitor(dotenv: str = None, lookback: int = 1):
@@ -120,6 +120,6 @@ def verify(
 
     eserv = setup_eserv(dotenv_path)
 
-    for key in 'microsoft-outlook', 'dropbox':
+    for key in 'msal', 'dropbox':
         if not query or query in key:
             eserv.config.creds[key].print(insecure=insecure, select=properties)

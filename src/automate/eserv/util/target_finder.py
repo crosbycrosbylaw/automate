@@ -222,4 +222,4 @@ class FolderMatcher:
         return None
 
 
-folder_matcher_factory = create_field_factory(FolderMatcher)
+get_dbx_folder_matcher = create_field_factory(FolderMatcher)

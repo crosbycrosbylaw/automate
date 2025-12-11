@@ -25,7 +25,7 @@ def _clean_document_name(raw: str | None) -> str:
     return ''.join(c for c in f'{prefix}temp_store' if c.isalnum() or c in {'.', '_', '-'})
 
 
-def document_store_factory(name: str | None = None) -> Path:
+def get_doc_store(name: str | None = None) -> Path:
     """Get a temporary directory to store downloaded documents."""
     _prune_temp()
 

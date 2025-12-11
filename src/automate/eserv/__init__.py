@@ -2,30 +2,31 @@
 
 __all__ = [
     'configure',
-    'document_store_factory',
     'download_documents',
     'error_factory',
-    'error_tracker_factory',
     'extract_aspnet_form_data',
     'extract_download_info',
     'extract_filename_from_disposition',
     'extract_links_from_response_html',
+    'extract_names_from_documents',
     'extract_post_request_url',
     'extract_upload_info',
-    'folder_matcher_factory',
-    'graph_client_factory',
-    'index_cache_factory',
+    'get_dbx_folder_matcher',
+    'get_dbx_index_cache',
+    'get_doc_store',
+    'get_error_tracker',
+    'get_notifier',
+    'get_record_processor',
+    'get_state_tracker',
     'make_dbx_cred',
+    'make_email_record',
+    'make_graph_client',
     'make_ms_cred',
-    'notifier_factory',
-    'processor_factory',
-    'record_factory',
-    'result_factory',
+    'parse_credential_json',
+    'process_pipeline_result',
     'stage',
-    'state_tracker_factory',
     'status',
     'status_flag_factory',
-    'text_extractor_factory',
     'upload_documents',
 ]
 
@@ -35,6 +36,5 @@ from .download import *
 from .errors import *
 from .extract import *
 from .monitor import *
-from .record import *
 from .upload import *
 from .util import *
