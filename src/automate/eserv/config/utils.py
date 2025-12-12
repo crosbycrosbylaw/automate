@@ -97,5 +97,6 @@ def get_example_env_dict() -> dict[str, str]:
     registry.setdefault('SMTP_SERVER', 'smtp.example.com')
     registry.setdefault('SMTP_FROM_ADDR', 'test@example.com')
     registry.setdefault('SMTP_TO_ADDR', 'test@example.com')
+    registry.setdefault('MONITORING_FOLDER_PATH', 'Inbox,Monitoring')
 
     return registry

@@ -4,7 +4,6 @@ import contextlib
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import cache
 from pathlib import Path
 from types import new_class
 from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
@@ -95,7 +94,6 @@ def _set_certificate_path_from_input() -> bool:
     return False
 
 
-@cache
 def _build_app_cred() -> dict[str, str]:
     try:
         project_root = Path(os.environ['PROJECT_ROOT'])
@@ -171,7 +169,7 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
     def get_token(self, *_: ..., **__: ...) -> AccessToken: ...
 
     def __post_init__(self) -> None:
-        self.get_token = self.credential.get_token
+
         if 'authority' not in self.credential:
             self.credential['authority'] = 'https://login.microsoftonline.com/common'
 

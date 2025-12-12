@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from functools import cached_property
 from operator import methodcaller
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Self, overload
 
 from azure.core.credentials import AccessToken
 from rampy import make_factory
@@ -171,6 +171,10 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         data = self.manager._refresh_token()
         return self.reconstruct(data)
 
+    @overload
+    def get_token(self, *args: ..., **kwds: ...) -> AccessToken: ...
+    @overload
+    def get_token(self) -> AccessToken: ...
     def get_token(self) -> AccessToken:
         return AccessToken(str(self), int(self))
 

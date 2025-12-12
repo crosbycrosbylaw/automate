@@ -11,7 +11,7 @@ from rampy import make_factory
 from automate.eserv.monitor.utils import resolve_mail_folders
 from automate.eserv.util.email_record import make_email_record
 
-from .request import build_msgraph_query_request, requestspec
+from .request import build_msgraph_query_request
 
 if TYPE_CHECKING:
     from automate.eserv.types import Config, EmailRecord, StatusFlag
@@ -31,12 +31,15 @@ class GraphClient:
         self.config = config
         self.cutoff = datetime.now(UTC) - timedelta(days=config.monitor_num_days)
 
-        self.client = GraphServiceClient(config.creds.msal.manager)
         self.request = partial(build_msgraph_query_request, client=self.client)
 
     @cached_property
     def path_segments(self) -> list[str]:
         return [part.strip() for part in self.config.monitor_mail_folder_path]
+
+    @cached_property
+    def client(self) -> GraphServiceClient:
+        return GraphServiceClient(self.config.creds.msal)
 
     async def _resolve_monitoring_folder_id(self) -> str:
         """Resolve monitoring folder path to folder ID.
@@ -49,8 +52,21 @@ class GraphClient:
             if 'monitoring' in self._folder_id_cache:
                 return self._folder_id_cache['monitoring']
 
-        spec: requestspec[MailFolder] = requestspec(self.client.me.mail_folders.path_parameters)
-        request = self.request(spec, select=['id', 'displayName', 'childFolders', 'childFolderCount'])
+        class _request:
+            builder = self.client.me.mail_folders
+
+            async def get(self) -> list[MailFolder]:
+                response = await self.builder.get(
+                    self.builder.MailFoldersRequestBuilderGetRequestConfiguration(
+                        query_parameters=self.builder.MailFoldersRequestBuilderGetQueryParameters(
+                            select=['id', 'displayName', 'childFolders', 'childFolderCount'],
+                            top=50,
+                        )
+                    )
+                )
+                return getattr(response, 'value', [])
+
+        request = _request()
 
         try:
             resolved_id = await resolve_mail_folders(
@@ -79,17 +95,34 @@ class GraphClient:
 
         """
         mfid = await self._resolve_monitoring_folder_id()
+        cutoff = self.cutoff.isoformat()
 
-        spec: requestspec[Message] = requestspec(
-            self.client.me.mail_folders.by_mail_folder_id(mfid).path_parameters
-        )
-        request = self.request(
-            spec,
-            filter=f'receivedDateTime ge {self.cutoff.isoformat()}Z',
-            top=50,
-            select=['id', 'from', 'subject', 'receivedDateTime', 'bodyPreview', 'body'],
-            count=True,
-        )
+        class _request:
+            builder = self.client.me.mail_folders.by_mail_folder_id(mfid).messages
+            odata_next_link: str | None = None
+
+            async def get(self) -> list[Message]:
+                response = await _request.builder.get(
+                    _request.builder.MessagesRequestBuilderGetRequestConfiguration(
+                        query_parameters=_request.builder.MessagesRequestBuilderGetQueryParameters(
+                            filter=f'receivedDateTime ge {cutoff}Z',
+                            top=50,
+                            select=['id', 'from', 'subject', 'receivedDateTime', 'bodyPreview', 'body'],
+                            count=True,
+                        )
+                    )
+                )
+                self.odata_next_link = response and response.odata_next_link
+                return getattr(response, 'value', [])
+
+            async def __next__(self) -> bool:
+                if onl := self.odata_next_link:
+                    self.builder = self.builder.with_url(onl)
+                    return True
+
+                return False
+
+        request = _request()
 
         records: list[EmailRecord] = []
 
