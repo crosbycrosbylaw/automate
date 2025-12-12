@@ -12,7 +12,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -25,7 +25,7 @@ from automate.eserv.core import *
 from automate.eserv.types import *
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Mapping
     from contextlib import _GeneratorContextManager
     from pathlib import Path
 

@@ -57,7 +57,7 @@ def mock_dropbox():
 
 @pytest.fixture
 def microsoft_credential():
-    return make_ms_cred(
+    return new_msal_credential(
         account='test-account',
         client_id='outlook_client_id',
         client_secret='outlook_client_secret',
@@ -141,7 +141,7 @@ def msal_refresh_test_case(
         **dict.fromkeys(remaining, Mock(return_value=None)),
     )
 
-    expected_data = parse_credential_json(response_data)[1].export()
+    expected_data = parse_credential_json({**response_data, 'type': 'msal'})[1].export()
 
     with patch(
         target='automate.eserv.util.msal_manager.ConfidentialClientApplication',

@@ -148,7 +148,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/ee/49/1377b49de7d0c1ce41292161ea0f721913fa8722c19fb9c1e3aa0367eecb/pytest_cov-7.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5e/ea/1057c5e3ac1ce36d8bc5817d7445b90fba06181508a23dff1fc3d13d2f6d/pytest_fixture_classes-1.0.4-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/14/1b/a298b06749107c305e1fe0f814c6c74aea7b2f1e10989cb30f544a1b3253/python_dotenv-1.2.1-py3-none-any.whl
-      - pypi: git+https://github.com/zaynram/ramda-py.git?branch=master#1757a8ed724906a68ad8bb3d6a537e769f7d7a85
+      - pypi: git+https://github.com/zaynram/ramda-py.git?branch=master#b2a9d9d8d930cb7458cf663f40b2951e4546ef4a
       - pypi: https://files.pythonhosted.org/packages/64/97/b4f2f442fee92a1406f08b4fbc990bd7d02dc84b3b5e6315a59fa9b2a9f4/std_uritemplate-2.0.8-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/ac/30/ac3a0c5bdc1d6efd1b41fa24d4897a4329b3b1e98de9449679dd327af4f0/yarl-1.22.0-cp314-cp314-win_amd64.whl
@@ -228,7 +228,7 @@ packages:
 - pypi: ./
   name: automate
   version: 0.0.1
-  sha256: bd41846975b172da9ded3ec24feb483079063c65c1ae8cc5fd9173a10ed846ef
+  sha256: 80e3cde1fd04a10ee918855833748ebef567ccc57e5d8bcfef61925ec4361894
   editable: true
 - pypi: https://files.pythonhosted.org/packages/b1/3c/b90d5afc2e47c4a45f4bba00f9c3193b0417fad5ad3bb07869f9d12832aa/azure_core-1.36.0-py3-none-any.whl
   name: azure-core
@@ -1585,7 +1585,7 @@ packages:
   - pkg:pypi/pyzmq?source=hash-mapping
   size: 185711
   timestamp: 1757387025899
-- pypi: git+https://github.com/zaynram/ramda-py.git?branch=master#1757a8ed724906a68ad8bb3d6a537e769f7d7a85
+- pypi: git+https://github.com/zaynram/ramda-py.git?branch=master#b2a9d9d8d930cb7458cf663f40b2951e4546ef4a
   name: rampy
   version: 0.0.2
 - conda: https://conda.anaconda.org/conda-forge/win-64/rapidfuzz-3.14.3-py314h13fbf68_1.conda

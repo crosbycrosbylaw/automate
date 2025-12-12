@@ -18,8 +18,3 @@ include-package-data = true
 package-dir = { "*" = "src", "eserv" = "src/automate" }
 packages    = ["automate", "eserv"]
 py-modules  = ["setup_console.py"]
-
-[tool.pytest.ini_options]
-
-tmp_path_retention_count  = 0
-tmp_path_retention_policy = "none"

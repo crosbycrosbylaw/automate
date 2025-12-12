@@ -10,19 +10,53 @@ Tests cover:
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
+from msgraph.generated.models.mail_folder import MailFolder
+from msgraph.generated.models.mail_folder_collection_response import MailFolderCollectionResponse
+from msgraph.generated.models.message import Message
 from requests.exceptions import HTTPError
 
+from automate.eserv.config import configure
+from automate.eserv.config.utils import get_example_env_dict
 from automate.eserv.monitor.client import make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
 
 if TYPE_CHECKING:
+    from collections.abc import *
+    from pathlib import Path
+
     from automate.eserv.types import GraphClient
+
+type Mocked[T] = Mock | T
+
+
+def mock_wraps[T](obj: T, **kwds: ...) -> Mocked[T]:
+    return Mock(wraps=obj, **kwds)
+
+
+def mail_folder(
+    id: str | None,
+    display_name: str,
+    parent_folder_id: str | None = None,
+    messages: Sequence[Message] = (),
+) -> MailFolder:
+    return MailFolder(
+        id=id,
+        display_name=display_name,
+        messages=[*messages],
+        parent_folder_id=parent_folder_id,
+    )
+
+
+def mail_folder_collection_response(odata_next_link: str | None, *folders: MailFolder):
+    return MailFolderCollectionResponse(odata_next_link=odata_next_link, value=[*folders])
 
 
 @pytest.fixture
@@ -37,25 +71,37 @@ def mock_credential() -> Mock:
 
 
 @pytest.fixture
-def mock_config() -> Mock:
+def mock_config(directory: Path) -> Mocked[Config]:
     """Create mock monitoring config."""
-    config = Mock(spec=['graph_api_base_url', 'folder_path'])
-    config.graph_api_base_url = 'https://graph.microsoft.com/v1.0'
-    config.folder_path = 'Inbox/Test Folder'
-    return config
+    env_dict = get_example_env_dict()
+    env_file = directory.joinpath('.env.example').resolve()
+    env_file.touch(exist_ok=True)
+    env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_dict.items()))
+    return mock_wraps(replace(configure(env_file), monitor_mail_folder_path=['Inbox', 'Test Folder']))
 
 
 @pytest.fixture
-def graph_client(mock_credential: Mock, mock_config: Mock) -> GraphClient:
+def graph_client(mock_config: Mocked[Config]) -> Generator[Mocked[GraphClient]]:
     """Create GraphClient instance for testing."""
-    return make_graph_client(config=mock_config)
+    with patch('automate.eserv.monitor.client.GraphServiceClient') as mock_service:
+        mock_client = mock_wraps(make_graph_client(mock_config))
+        mock_client.service = mock_service
+
+        async def resolve_monitoring_folder_id():
+            await asyncio.sleep(1)
+
+            return 'example-folder-id'
+
+        mock_client.configure_mock(resolve_monitoring_folder_id=resolve_monitoring_folder_id)
+        yield mock_client
 
 
+@patch('automate.eserv.monitor.client.GraphServiceClient')
 class TestFilterExpression:
     """Test Graph API OData filter expression generation."""
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_filter_syntax_uses_odata_operators(
+    @pytest.mark.asyncio
+    async def test_filter_syntax_uses_odata_operators(
         self,
         mock_request: Mock,
         graph_client: GraphClient,
@@ -68,11 +114,13 @@ class TestFilterExpression:
         mock_response.json.return_value = {'value': []}
         mock_request.return_value = mock_response
 
+        graph_client.service
+
         # Mock folder resolution to avoid actual API call
         graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
 
         # Call fetch_unprocessed_emails
-        graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
+        await graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
 
         # Verify request was made with correct filter
         call_args = mock_request.call_args
@@ -84,8 +132,8 @@ class TestFilterExpression:
         assert 'hasAttachments:false' not in filter_expr
         assert 'NOT hasAttachments:false' not in filter_expr
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_filter_includes_date_range(
+    @pytest.mark.asyncio
+    async def test_filter_includes_date_range(
         self,
         mock_request: Mock,
         graph_client: GraphClient,
@@ -100,7 +148,7 @@ class TestFilterExpression:
         graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
 
         # Call with 7 days lookback
-        graph_client.fetch_unprocessed_emails(num_days=7, processed_uids=set())
+        await graph_client.fetch_unprocessed_emails(num_days=7, processed_uids=set())
 
         call_args = mock_request.call_args
         params = call_args[1].get('params', {})

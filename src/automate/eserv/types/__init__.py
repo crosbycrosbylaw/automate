@@ -1,12 +1,10 @@
 from typing import TYPE_CHECKING
 
 __all__ = [
-    'BaseFields',
     'BatchResult',
     'CaseMatch',
     'Config',
     'CredentialsConfig',
-    'CredentialsJSON',
     'DocumentDownloadError',
     'DocumentExtractionError',
     'DocumentUploadError',
@@ -27,8 +25,6 @@ __all__ = [
     'InvalidFormatError',
     'MSALManager',
     'MissingVariableError',
-    'MonitoringFields',
-    'NotificationConfig',
     'Notifier',
     'OAuthCredential',
     'PartialEmailRecord',
@@ -37,7 +33,6 @@ __all__ = [
     'PipelineError',
     'PipelineStage',
     'ProcessedResult',
-    'SMTPFields',
     'StatusFlag',
     'TokenManager',
     'UploadInfo',
@@ -46,6 +41,7 @@ __all__ = [
 ]
 
 
+from automate.eserv.config.main import Config
 from automate.eserv.config.types import *
 from automate.eserv.errors.types import *
 from automate.eserv.monitor.types import *
@@ -58,6 +54,7 @@ from .structs import *
 if TYPE_CHECKING:
     __all__ += [
         'CredentialType',
+        'CredentialsJSON',
         'DropboxCredential',
         'ErrorDict',
         'MSALCredential',

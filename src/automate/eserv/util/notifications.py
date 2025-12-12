@@ -16,26 +16,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import TYPE_CHECKING
 
-from rampy import create_field_factory
+from rampy import make_factory
 
 from setup_console import console
 
 if TYPE_CHECKING:
-    from automate.eserv.util.configuration import SMTPConfig
-
-
-@dataclass(slots=True, frozen=True)
-class NotificationConfig:
-    """Configuration for notification email content.
-
-    Attributes:
-        subject_prefix: Prefix for email subject lines.
-        include_details: Whether to include detailed logs in emails.
-
-    """
-
-    subject_prefix: str = '[ESERV]'
-    include_details: bool = True
+    from automate.eserv.types import SMTPConfig
 
 
 @dataclass
@@ -43,18 +29,15 @@ class Notifier:
     """Sends email notifications for pipeline events.
 
     Attributes:
-        smtp_config: SMTP configuration for email delivery.
+        smtp: SMTP configuration for email delivery.
         notification_config: Configuration for notification content.
 
     """
 
-    smtp_config: SMTPConfig
-    notification_config: NotificationConfig = field(init=False)
+    smtp: SMTPConfig
 
-    def __post_init__(self) -> None:
-        from automate.eserv.util.types import NotificationConfig
-
-        self.notification_config = NotificationConfig()
+    prefix: str = field(default='[automate.eserv]')
+    verbose: bool = field(default=True)
 
     def _send_email(self, subject: str, body: str) -> None:
         """Send an email notification.
@@ -65,20 +48,20 @@ class Notifier:
 
         """
         msg = MIMEMultipart()
-        msg['From'] = self.smtp_config.from_addr
-        msg['To'] = self.smtp_config.to_addr
-        msg['Subject'] = f'{self.notification_config.subject_prefix} {subject}'
+        msg['From'] = self.smtp['sender']
+        msg['To'] = self.smtp['recipient']
+        msg['Subject'] = f'{self.prefix} {subject}'
         msg.attach(MIMEText(body, 'plain'))
 
         try:
-            if self.smtp_config.use_tls:
-                server = smtplib.SMTP(self.smtp_config.server, self.smtp_config.port)
+            if self.smtp['use_tls']:
+                server = smtplib.SMTP(self.smtp['server'], self.smtp['port'])
                 server.starttls()
             else:
-                server = smtplib.SMTP(self.smtp_config.server, self.smtp_config.port)
+                server = smtplib.SMTP(self.smtp['server'], self.smtp['port'])
 
-            if self.smtp_config.username and self.smtp_config.password:
-                server.login(self.smtp_config.username, self.smtp_config.password)
+            if self.smtp['username'] and self.smtp['password']:
+                server.login(self.smtp['username'], self.smtp['password'])
 
             server.send_message(msg)
             server.quit()
@@ -127,7 +110,7 @@ Manual review required for document upload.
 Case: {case_name}
 Reason: {reason}
 """
-        if details and self.notification_config.include_details:
+        if details and self.verbose:
             body += '\nDetails:\n'
             for key, value in details.items():
                 body += f'  {key}: {value}\n'
@@ -158,7 +141,7 @@ Case: {case_name}
 Stage: {stage}
 Error: {error}
 """
-        if context and self.notification_config.include_details:
+        if context and self.verbose:
             body += '\nContext:\n'
             for key, value in context.items():
                 body += f'  {key}: {value}\n'
@@ -166,4 +149,4 @@ Error: {error}
         self._send_email(subject, body)
 
 
-get_notifier = create_field_factory(Notifier)
+get_notifier = make_factory(Notifier)

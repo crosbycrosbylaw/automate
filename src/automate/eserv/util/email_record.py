@@ -14,8 +14,8 @@ if typing.TYPE_CHECKING:
     def make_email_record(
         *,
         uid: str | None = None,
-        sender: str = 'unknown',
-        subject: str = '',
+        sender: str | None = 'unknown',
+        subject: str | None = '',
     ) -> EmailInfo: ...
     @typing.overload
     def make_email_record(
@@ -23,8 +23,8 @@ if typing.TYPE_CHECKING:
         *,
         uid: str | None = None,
         received_at: datetime | None = None,
-        subject: str = '',
-        sender: str = 'unknown',
+        subject: str | None = '',
+        sender: str | None = 'unknown',
     ) -> EmailRecord: ...
 
 
@@ -33,13 +33,15 @@ def make_email_record(
     *,
     uid: str | None = None,
     received_at: datetime | None = None,
-    subject: str = '',
-    sender: str = 'unknown',
+    subject: str | None = '',
+    sender: str | None = 'unknown',
 ) -> ...:
     """Initialize a new email record, with sensible defaults."""
     from automate.eserv.types.structs import EmailInfo, EmailRecord
 
     uid = uid or str(uuid4())
+    subject = subject or ''
+    sender = sender or 'unknown'
 
     if body is None:
         return EmailInfo(uid=uid, sender=sender, subject=subject)

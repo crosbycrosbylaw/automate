@@ -15,7 +15,7 @@ from dataclasses import InitVar, dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
-from rampy import console, create_field_factory
+from rampy import console, make_factory
 
 from automate.eserv.monitor.flags import status_flag_factory
 
@@ -158,9 +158,7 @@ class PipelineError(Exception):
     ):
         scope = locals()
         error_cls = cls._resolve_stage(scope.pop('stage'))
-        return error_cls(**{
-            name: value for name in cls.__dataclass_fields__ if (value := scope.get(name))
-        })
+        return error_cls(**{name: value for name in cls.__dataclass_fields__ if (value := scope.get(name))})
 
     @classmethod
     def from_exc(
@@ -239,4 +237,4 @@ class FolderResolutionError(PipelineError):
     context: dict[str, object] = field(default_factory=dict, repr=False)
 
 
-error_factory = create_field_factory(PipelineError.from_stage)
+error_factory = make_factory(PipelineError.from_stage)

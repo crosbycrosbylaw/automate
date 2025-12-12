@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NoReturn, Self, Unpack, overload
 
 import orjson
-from rampy.util import create_field_factory
+from rampy.util import make_factory
 
 from setup_console import console
 
@@ -310,4 +310,4 @@ class ErrorTracker:
         console.bind(cutoff_days=days).info('Cleared old errors')
 
 
-get_error_tracker = create_field_factory(ErrorTracker)
+get_error_tracker = make_factory(ErrorTracker)

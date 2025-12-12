@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import orjson
-from rampy.util import create_field_factory
+from rampy.util import make_factory
 
 from setup_console import console
 
@@ -149,4 +149,4 @@ class IndexCache:
         return [*self._index.keys()]
 
 
-get_dbx_index_cache = create_field_factory(IndexCache)
+get_dbx_index_cache = make_factory(IndexCache)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from rampy import create_field_factory
+from rampy import make_factory
 from requests import HTTPError
 
 from setup_console import console
@@ -82,4 +82,4 @@ class EmailProcessor:
         return status_flag_factory(result.error)
 
 
-get_record_processor = create_field_factory(EmailProcessor)
+get_record_processor = make_factory(EmailProcessor)

@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
 
     from typing import Any, Literal, NotRequired, ReadOnly, Required, TypedDict, type_check_only
 
-    from automate.eserv.config.types import EmailAddress
+    from automate.eserv.config.utils import EmailAddress
 
     type CredentialType = Literal['dropbox', 'msal']
     type ProcessStatus = Literal['success', 'error']

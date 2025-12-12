@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class PathsConfig:
     """File storage paths."""
 
@@ -29,11 +29,11 @@ class PathsConfig:
 
     dotenv_path: InitVar[PathLike[str] | None]
 
-    def __new__(cls, dotenv: PathLike[str] | None = None) -> PathsConfig:
-        cls._status = load_dotenv(dotenv, override=bool(dotenv))
+    def __new__(cls, dotenv_path: PathLike[str] | None = None) -> PathsConfig:
+        cls._status = load_dotenv(dotenv_path, override=bool(dotenv_path))
         config = super().__new__(cls)
-        if dotenv is not None:
-            object.__setattr__(config, 'dotenv', dotenv)
+        if dotenv_path is not None:
+            object.__setattr__(config, 'dotenv', dotenv_path)
         return config
 
     root: Path = field(

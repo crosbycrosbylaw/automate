@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-__all__ = ['email_env_var', 'env_var', 'hint', 'int_env_var']
+__all__ = ['email_env_var', 'env_var', 'get_example_env_dict', 'hint', 'int_env_var']
 
 import os
 import re
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Final, Literal, NewType, overload
 
-from rampy import create_field_factory
+from rampy import make_factory
 
 from automate.eserv.errors.types import InvalidFormatError, MissingVariableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from automate.eserv.types import *
+
+EmailAddress = NewType('EmailAddress', str)
 
 
 class ValidationHint:
@@ -21,7 +22,9 @@ class ValidationHint:
         self.__str__ = lambda: string
 
 
-hint = create_field_factory(ValidationHint)
+hint = make_factory(ValidationHint)
+
+_REGISTRY: Final[dict[str, str]] = {}
 
 
 @overload
@@ -43,6 +46,10 @@ def env_var[T = str](
     into: Callable[[str], T | ValidationHint] = str,
     optional: bool = False,
 ) -> ...:
+
+    if default or optional:
+        _REGISTRY[key] = default or ''
+
     def _factory() -> ...:
         value = os.getenv(key, default)
 
@@ -76,6 +83,19 @@ def int_env_var(key: str, default: int | None = None):
 
 
 def email_env_var(key: str):
+    from automate.eserv.config.types import EmailAddress
+
     pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
     into = lambda s: EmailAddress(s) if pattern.match(s) else hint('expected valid email address')
     return env_var(key, into=into)
+
+
+def get_example_env_dict() -> dict[str, str]:
+    registry = _REGISTRY.copy()
+
+    registry.setdefault('PROJECT_ROOT', './')
+    registry.setdefault('SMTP_SERVER', 'smtp.example.com')
+    registry.setdefault('SMTP_FROM_ADDR', 'test@example.com')
+    registry.setdefault('SMTP_TO_ADDR', 'test@example.com')
+
+    return registry

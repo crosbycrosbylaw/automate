@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 import orjson
 
+from automate.eserv.util.oauth_manager import OAuthCredential
+
 if TYPE_CHECKING:
     from pathlib import Path
     from threading import Lock
@@ -27,14 +29,14 @@ def parse_credential_json(
 
     match key := data['type']:
         case 'dropbox':
-            from automate.eserv._module import make_dbx_cred
+            from automate.eserv import new_dropbox_credential
 
-            cred = make_dbx_cred(**keywords)
+            cred = new_dropbox_credential(**keywords)
 
         case 'msal':
-            from automate.eserv._module import make_ms_cred
+            from automate.eserv import new_msal_credential
 
-            cred = make_ms_cred(**keywords)
+            cred = new_msal_credential(**keywords)
 
         case _:
             cred = OAuthCredential(**keywords)
@@ -60,43 +62,51 @@ class CredentialsConfig:
             self._mapping.update([parse_credential_json(json)])
 
     def __setitem__(self, name: CredentialType, value: OAuthCredential[Any]) -> None:
-        self._mapping[name] = value
+        """Update or add a cached OAuth2 credential."""
+        with self._lock:
+            self._mapping[name] = value
 
     if TYPE_CHECKING:
 
         @overload
-        def get(
+        def __getitem__(
             self,
             name: Literal['msal'],
         ) -> OAuthCredential[MSALManager]: ...
         @overload
-        def get(
+        def __getitem__(
             self,
             name: Literal['dropbox'],
         ) -> OAuthCredential[DropboxManager]: ...
 
-    def get(self, name: CredentialType) -> OAuthCredential[Any]:
-        """Retrieve the named authorization credential, storing the value if not found in cache."""
+    def __getitem__(self, name: CredentialType) -> OAuthCredential[Any]:
+        """Retrieve the named OAuth2 credential directly from the cache."""
+        with self._lock:
+            return self._mapping[name]
+
+    if TYPE_CHECKING:
+
+        @overload
+        def __getattr__(
+            self,
+            name: Literal['msal'],
+        ) -> OAuthCredential[MSALManager]: ...
+        @overload
+        def __getattr__(
+            self,
+            name: Literal['dropbox'],
+        ) -> OAuthCredential[DropboxManager]: ...
+
+    def __getattr__(self, name: CredentialType) -> OAuthCredential[Any]:
+        """Retrieve the named authorization credential, storing the value if not found in cache.
+
+        This method automatically refreshes expired credentials.
+        """
         with self._lock:
             cred = self._mapping[name]
             return cred if not cred.outdated else self._refresh(cred)
 
-    if TYPE_CHECKING:
-        __getitem__ = get
-    else:
-
-        def __getitem__(self, name: ...) -> ...:
-            """Retrieve the named OAuth2 credential directly from the cache."""
-            return self._mapping[name]
-
-    __getattr__ = get
-
-    @staticmethod
-    def is_expired(cred: OAuthCredential) -> bool:
-        """Check if credential needs refresh."""
-        return cred.outdated
-
-    def _refresh(self, cred: OAuthCredential) -> OAuthCredential:
+    def _refresh(self, cred: OAuthCredential[Any]) -> OAuthCredential:
         """Refresh an OAuth2 token.
 
         Raises:
@@ -109,16 +119,18 @@ class CredentialsConfig:
         if cred.type == 'msal':
             refreshed.properties.setdefault('msal_migrated', True)
 
-        self._mapping[cred.type] = refreshed
-        self.persist()
+        with self._lock:
+            self._mapping[cred.type] = refreshed
+            self.persist()
 
         return refreshed
 
     def persist(self, mapping: dict[CredentialType, OAuthCredential[Any]] | None = None) -> None:
         """Write updated credentials back to disk."""
-        self._mapping.update(mapping or ())
+        with self._lock:
+            self._mapping.update(mapping or {})
 
-        data: list[dict[str, Any]] = [cred.export() for cred in self._mapping.values()]
+        data = [cred.export() for cred in self._mapping.values()]
 
         with self.path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))

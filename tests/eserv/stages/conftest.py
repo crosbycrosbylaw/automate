@@ -105,7 +105,7 @@ class UploadDocumentSubtestFixture(test.subtestfix):
             with (
                 patch('automate.eserv.upload.get_dbx_index_cache', return_value=self.mock_cache),
                 patch('automate.eserv.upload.get_dbx_folder_matcher', return_value=self.mock_matcher),
-                patch('automate.eserv.upload.DropboxManager', return_value=self.mock_dbx),
+                patch('automate.eserv.util.dbx_manager.DropboxManager', return_value=self.mock_dbx),
                 patch('automate.eserv.upload.get_notifier', return_value=self.mock_notifier),
             ):
                 yield

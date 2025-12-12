@@ -1,22 +1,23 @@
 # ruff: noqa: BLE001
 from __future__ import annotations
 
+import contextvars
 from datetime import UTC, datetime
+from os import PathLike
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
-from rampy.util import create_field_factory
+from rampy.util import make_factory
 
 from automate.eserv import *
 from automate.eserv.types import *
 from setup_console import console
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from automate.eserv.types import BatchResult, EmailRecord, ProcessedResult
 
-tracker: ErrorTracker
+tracker = contextvars.ContextVar[ErrorTracker]('tracker')
 
 
 def _parse(record: EmailRecord) -> BeautifulSoup | IntermediaryResult:
@@ -26,7 +27,7 @@ def _parse(record: EmailRecord) -> BeautifulSoup | IntermediaryResult:
     try:
         soup = BeautifulSoup(record.html_body, features='html.parser')
     except Exception as e:
-        return tracker.error(
+        return tracker.get().error(
             event='BeautifulSoup initialization',
             stage=stage.EMAIL_PARSING,
             context={**context, 'exception': str(e)},
@@ -42,9 +43,9 @@ def _download(soup: BeautifulSoup) -> IntermediaryResult | DownloadInfo:
     try:
         download_info = download_documents(soup)
     except PipelineError as e:
-        return tracker.error(exception=e)
+        return tracker.get().error(exception=e)
     except Exception as e:
-        return tracker.error(exception=e, stage=stage.DOCUMENT_DOWNLOAD)
+        return tracker.get().error(exception=e, stage=stage.DOCUMENT_DOWNLOAD)
     else:
         console.info(event='Downloaded documents', **download_info.asdict())
 
@@ -58,13 +59,13 @@ def _extract(soup: BeautifulSoup, download_info: DownloadInfo) -> UploadInfo | I
     try:
         upload_info = extract_upload_info(soup, download_info.store_path)
     except PipelineError as e:
-        return tracker.error(
+        return tracker.get().error(
             event='UploadInfo extraction',
             exception=e,
             context=context,
         )
     except Exception as e:
-        return tracker.error(
+        return tracker.get().error(
             event='UploadInfo extraction',
             exception=e,
             stage=stage.EMAIL_PARSING,
@@ -95,19 +96,19 @@ def _upload(config: Config, context: dict[str, Any]) -> IntermediaryResult:
             )
         case status.MANUAL_REVIEW:
             context['folder_path'] = result.folder_path
-            tracker.warning(
+            tracker.get().warning(
                 message='No folder match found, sent to manual review',
                 stage=stage.FOLDER_MATCHING,
                 context=context,
             )
         case status.NO_WORK:
-            tracker.warning(
+            tracker.get().warning(
                 message='No PDF files found after download',
                 stage=stage.DOCUMENT_DOWNLOAD,
                 context=context,
             )
         case status.ERROR:
-            tracker.error(
+            tracker.get().error(
                 result=result,
                 stage=stage.DROPBOX_UPLOAD,
                 context=context,
@@ -121,8 +122,11 @@ class Pipeline:
 
     stage: stage = stage.INITIALIZATION
 
-    def __init__(self, dotenv_path: Path | None = None) -> None:
+    def __init__(self, dotenv_path: PathLike[str] | Path | None = None) -> None:
         """Initialize pipeline with configuration."""
+        if isinstance(dotenv_path, PathLike):
+            dotenv_path = Path(dotenv_path)
+
         self.config = configure(dotenv_path)
         self.state = get_state_tracker(self.config.paths.state)
         self.tracker = get_error_tracker(self.config.paths.error_log)
@@ -138,15 +142,15 @@ class Pipeline:
             IntermediaryResult with status and details.
 
         """
-        global tracker
-
         if record.uid and self.state.is_processed(record.uid):
             console.info('Email already processed, skipping')
             return IntermediaryResult(status=status.NO_WORK)
 
         context: dict[str, Any] = {'uid': record.uid}
 
-        with self.tracker.track(record.uid) as tracker:
+        with self.tracker.track(record.uid) as t:
+            tracker.set(t)
+
             context['started_at'] = datetime.now(UTC).isoformat()
 
             self.stage = stage.EMAIL_PARSING
@@ -229,4 +233,4 @@ class Pipeline:
         return process_pipeline_result(record=rec, error=error)
 
 
-setup_eserv = create_field_factory(Pipeline)
+eserv_pipeline = make_factory(Pipeline)

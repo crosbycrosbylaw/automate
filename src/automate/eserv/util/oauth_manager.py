@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import InitVar, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
+from functools import cached_property
 from operator import methodcaller
 from typing import TYPE_CHECKING, Any, Self
 
 from azure.core.credentials import AccessToken
-from rampy import create_field_factory
+from rampy import make_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -14,16 +15,8 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
-@dataclass(slots=True)
-class OAuthCredential[T: TokenManager = TokenManager[Any]]:
-    """OAuth credential with token and expiry.
-
-    The string representation of an `OAuthCredential` evaluates to it's access token.
-    """
-
-    factory: InitVar[Callable[[Self], T]] = field(repr=False, metadata={'internal': True})
-    manager: T = field(init=False, metadata={'internal': True})
-
+@dataclass
+class BaseCredential:
     type: CredentialType
     client_id: str
     client_secret: str
@@ -31,26 +24,28 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
     scope: str
     access_token: str
     refresh_token: str
-    account: str | None = None
-    properties: dict[str, Any] = field(default_factory=dict, metadata={'internal': True})
 
+
+@dataclass
+class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
+    """OAuth credential with token and expiry.
+
+    The string representation of an `OAuthCredential` evaluates to it's access token.
+    """
+
+    factory: Callable[[Self], T] = field(repr=False, metadata={'internal': True})
+    account: str | None = field(default=None)
+    properties: dict[str, Any] = field(default_factory=dict, metadata={'internal': True})
     expires_at: str | datetime | None = field(
         default=None,
-        metadata={'dynamic': methodcaller('_resolve_expiration')},
+        metadata={
+            'dynamic': methodcaller('expiration'),
+        },
     )
 
-    def _resolve_expiration(self) -> datetime:
-        if self.expires_at:
-            if isinstance(self.expires_at, datetime):
-                return self.expires_at
-
-            return datetime.fromisoformat(self.expires_at)
-
-        if expires_in := self.get('expires_in', 0):
-            issued_at = self.get('issued_at', datetime.now(UTC).isoformat())
-            return datetime.fromisoformat(issued_at) + timedelta(seconds=expires_in)
-
-        return datetime.now(UTC) - timedelta(days=1)  # force refresh
+    @cached_property
+    def manager(self) -> T:
+        return self.factory(self)
 
     @property
     def outdated(self) -> bool:
@@ -62,9 +57,25 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
 
         return self.expires_at
 
-    def __post_init__(self, factory: Callable[[Self], T]) -> None:
-        self.manager = factory(self)
-        self.expires_at = self._resolve_expiration()
+    def _resolve_expiration(self) -> datetime:
+        if isinstance(self.expires_at, datetime):
+            return self.expires_at
+        if self.expires_at is not None:
+            return datetime.fromisoformat(self.expires_at)
+
+        if expires_in := self.get('expires_in', 0):
+            issued_at = self.get('issued_at', datetime.now(UTC).isoformat())
+            return datetime.fromisoformat(issued_at) + timedelta(seconds=expires_in)
+
+        return datetime.now(UTC) - timedelta(days=1)  # force refresh
+
+    def __str__(self) -> str:
+        """Return the access token as string representation."""
+        return self.access_token
+
+    def __int__(self) -> int:
+        """Return the expiration datetime as a UNIX timestamp."""
+        return int(self._resolve_expiration().timestamp())
 
     def __getitem__(self, name: str) -> Any:
         return self.properties[name]
@@ -78,17 +89,6 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
     def get[D = object](self, name: str, default: D | None = None) -> D:
         return self.properties.get(name, default)
 
-    def __str__(self) -> str:
-        """Return the access token as string representation."""
-        return self.access_token
-
-    def __int__(self) -> int:
-        """Return the expiration datetime as a UNIX timestamp."""
-        return int(self._resolve_expiration().timestamp())
-
-    def __call__(self) -> AccessToken:
-        return AccessToken(str(self), int(self))
-
     def print(
         self,
         *,
@@ -100,7 +100,7 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
         console.info(
             f'{self.type} credential',
             **{
-                key: value
+                key: str(value)
                 for key, value in self.export().items()
                 if any([
                     select and key in select,
@@ -171,5 +171,8 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]]:
         data = self.manager._refresh_token()
         return self.reconstruct(data)
 
+    def get_token(self) -> AccessToken:
+        return AccessToken(str(self), int(self))
 
-make_oauth_credential = create_field_factory(OAuthCredential)
+
+make_oauth_credential = make_factory(OAuthCredential)

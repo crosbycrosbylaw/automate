@@ -1,6 +1,6 @@
 import fire
 
-from automate.eserv import main
+from automate.eserv._component import component
 
 if __name__ == '__main__':
-    fire.Fire(main, name='eserv')
+    fire.Fire(component, name='eserv')

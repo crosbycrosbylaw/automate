@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 
 from azure.core.credentials import TokenCredential
 from msal import ConfidentialClientApplication
-from rampy import create_field_factory
+from rampy import make_factory
 
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
@@ -168,7 +168,10 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
 
         return client
 
+    def get_token(self, *_: ..., **__: ...) -> AccessToken: ...
+
     def __post_init__(self) -> None:
+        self.get_token = self.credential.get_token
         if 'authority' not in self.credential:
             self.credential['authority'] = 'https://login.microsoftonline.com/common'
 
@@ -252,8 +255,5 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
             'error_description': 'Token refresh was unsuccessful',
         })
 
-    def get_token(self, *_: ..., **__: ...) -> AccessToken:
-        return self.credential()
 
-
-make_msal_manager = create_field_factory(MSALManager)
+make_msal_manager = make_factory(MSALManager)

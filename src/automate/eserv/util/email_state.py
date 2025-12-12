@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, overload
 
 import orjson
-from rampy.util import create_field_factory
+from rampy.util import make_factory
 
 from automate.eserv.monitor.result import process_pipeline_result
 from automate.eserv.types.results import ProcessedResult
@@ -84,4 +84,4 @@ class EmailState:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
-get_state_tracker = create_field_factory(EmailState)
+get_state_tracker = make_factory(EmailState)

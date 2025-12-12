@@ -1,3 +1,10 @@
-from rampy import console
+from typing import Any
 
-console = console.bind()
+import rampy.console
+
+
+def get_console(**kwds: Any):
+    return rampy.console.bind(**kwds)
+
+
+console = rampy.console.root()
