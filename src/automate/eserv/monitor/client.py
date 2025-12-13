@@ -36,7 +36,7 @@ class GraphClient:
         skip: int | None = field(default=None, doc='Skip the first n items')
         top: int | None = field(default=None, doc='Show only the first n items')
 
-        odata_next_link: str | None = field(init=False, default=None)
+        odata_next_link: str | None = field(init=False)
 
         def _qs(self) -> GetQueryParameter:
             cls = getattr(
@@ -47,12 +47,24 @@ class GraphClient:
         async def get(self) -> list[T]:
             response = await self.builder.get(RequestConfiguration(query_parameters=self._qs()))
             self.odata_next_link = getattr(response, 'odata_next_link', None)
-            return getattr(response, 'value', [])
+            value = getattr(response, 'value', [])
+            return value if isinstance(value, list) else [value]
 
-        async def __next__(self) -> bool:
-            if out := self.odata_next_link is not None:
-                self.builder = self.builder.with_url(self.odata_next_link)
+        async def collect(self) -> list[T]:
+            out: list[T] = []
+            while next(self):
+                out[:] = [*out, *await self.get()]
             return out
+
+        def __next__(self) -> bool:
+            if not hasattr(self, 'odata_next_link'):
+                return True
+
+            if self.odata_next_link is not None:
+                self.builder = self.builder.with_url(self.odata_next_link)
+                return True
+
+            return False
 
     def __init__(self, config: Config) -> None:
         """Initialize a Microsoft Graph client."""
@@ -115,6 +127,8 @@ class GraphClient:
         mfid = await self._resolve_monitoring_folder_id()
         cutoff = self.cutoff.isoformat()
 
+        records: list[EmailRecord] = []
+
         request = self.request(
             self.client.me.mail_folders.by_mail_folder_id(mfid).messages,
             filter=f'receivedDateTime ge {cutoff}Z',
@@ -123,30 +137,23 @@ class GraphClient:
             count=True,
         )
 
-        records: list[EmailRecord] = []
+        for m in await request.collect():
+            if not m.id or m.id in processed_uids:
+                continue
 
-        while True:
-            for m in await request.get():
-                if not m.id or m.id in processed_uids:
-                    continue
+            if not (content := getattr(m.body, 'content', None)):
+                message = f'Missing HTML body for message {m.id}'
+                raise ValueError(message)
 
-                if content := m.body and m.body.content:
-                    records.append(
-                        make_email_record(
-                            uid=m.id,
-                            sender=m.sender and m.sender.email_address and m.sender.email_address.address,
-                            subject=m.subject,
-                            body=content,
-                            received_at=m.received_date_time,
-                        )
-                    )
-
-                else:
-                    message = f'Email {m.id} has no HTML body'
-                    raise ValueError(message)
-
-            if not await next(request):
-                break
+            records.append(
+                make_email_record(
+                    uid=m.id,
+                    sender=m.sender and m.sender.email_address and m.sender.email_address.address,
+                    subject=m.subject,
+                    body=content,
+                    received_at=m.received_date_time,
+                )
+            )
 
         return records
 
