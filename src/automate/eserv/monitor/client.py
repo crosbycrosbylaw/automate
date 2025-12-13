@@ -1,27 +1,58 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
-from functools import cached_property, partial
+from functools import cached_property
 from typing import TYPE_CHECKING
 
+from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.graph_service_client import GraphServiceClient
 from rampy import make_factory
 
 from automate.eserv.monitor.utils import resolve_mail_folders
 from automate.eserv.util.email_record import make_email_record
 
-from .request import build_msgraph_query_request
-
 if TYPE_CHECKING:
     from automate.eserv.types import Config, EmailRecord, StatusFlag
 
     from .client import GraphClient
-    from .types import MailFolder, Message
+    from .types import BuilderProto, GetQueryParameter
 
 
 class GraphClient:
     """Microsoft Graph API client for email monitoring."""
+
+    @dataclass
+    class request[T]:
+        builder: BuilderProto[T]
+
+        count: bool | None = field(default=None, doc='Include count of items')
+        expand: list[str] | None = field(default=None, doc='Expand related entities')
+        filter: str | None = field(default=None, doc='Filter items by property values')
+        orderby: list[str] | None = field(default=None, doc='Order items by property values')
+        search: str | None = field(default=None, doc='Search items by search phrases')
+        select: list[str] | None = field(default=None, doc='Select properties to be returned')
+        skip: int | None = field(default=None, doc='Skip the first n items')
+        top: int | None = field(default=None, doc='Show only the first n items')
+
+        odata_next_link: str | None = field(init=False, default=None)
+
+        def _qs(self) -> GetQueryParameter:
+            cls = getattr(
+                self.builder, next(a for a in dir(self.builder) if a.endswith('GetQueryParameters'))
+            )
+            return cls(**{f.name: getattr(self, f.name) for f in fields(self) if f.doc is not None})
+
+        async def get(self) -> list[T]:
+            response = await self.builder.get(RequestConfiguration(query_parameters=self._qs()))
+            self.odata_next_link = getattr(response, 'odata_next_link', None)
+            return getattr(response, 'value', [])
+
+        async def __next__(self) -> bool:
+            if out := self.odata_next_link is not None:
+                self.builder = self.builder.with_url(self.odata_next_link)
+            return out
 
     def __init__(self, config: Config) -> None:
         """Initialize a Microsoft Graph client."""
@@ -30,8 +61,6 @@ class GraphClient:
 
         self.config = config
         self.cutoff = datetime.now(UTC) - timedelta(days=config.monitor_num_days)
-
-        self.request = partial(build_msgraph_query_request, client=self.client)
 
     @cached_property
     def path_segments(self) -> list[str]:
@@ -52,21 +81,11 @@ class GraphClient:
             if 'monitoring' in self._folder_id_cache:
                 return self._folder_id_cache['monitoring']
 
-        class _request:
-            builder = self.client.me.mail_folders
-
-            async def get(self) -> list[MailFolder]:
-                response = await self.builder.get(
-                    self.builder.MailFoldersRequestBuilderGetRequestConfiguration(
-                        query_parameters=self.builder.MailFoldersRequestBuilderGetQueryParameters(
-                            select=['id', 'displayName', 'childFolders', 'childFolderCount'],
-                            top=50,
-                        )
-                    )
-                )
-                return getattr(response, 'value', [])
-
-        request = _request()
+        request = self.request(
+            self.client.me.mail_folders,
+            select=['id', 'displayName', 'childFolders', 'childFolderCount'],
+            top=50,
+        )
 
         try:
             resolved_id = await resolve_mail_folders(
@@ -85,7 +104,6 @@ class GraphClient:
     async def fetch_unprocessed_emails(
         self,
         processed_uids: set[str],
-        num_days: int | None = None,
     ) -> list[EmailRecord]:
         """Fetch emails from monitoring folder, excluding any that were already processed.
 
@@ -97,32 +115,13 @@ class GraphClient:
         mfid = await self._resolve_monitoring_folder_id()
         cutoff = self.cutoff.isoformat()
 
-        class _request:
-            builder = self.client.me.mail_folders.by_mail_folder_id(mfid).messages
-            odata_next_link: str | None = None
-
-            async def get(self) -> list[Message]:
-                response = await _request.builder.get(
-                    _request.builder.MessagesRequestBuilderGetRequestConfiguration(
-                        query_parameters=_request.builder.MessagesRequestBuilderGetQueryParameters(
-                            filter=f'receivedDateTime ge {cutoff}Z',
-                            top=50,
-                            select=['id', 'from', 'subject', 'receivedDateTime', 'bodyPreview', 'body'],
-                            count=True,
-                        )
-                    )
-                )
-                self.odata_next_link = response and response.odata_next_link
-                return getattr(response, 'value', [])
-
-            async def __next__(self) -> bool:
-                if onl := self.odata_next_link:
-                    self.builder = self.builder.with_url(onl)
-                    return True
-
-                return False
-
-        request = _request()
+        request = self.request(
+            self.client.me.mail_folders.by_mail_folder_id(mfid).messages,
+            filter=f'receivedDateTime ge {cutoff}Z',
+            top=50,
+            select=['id', 'from', 'subject', 'receivedDateTime', 'bodyPreview', 'body'],
+            count=True,
+        )
 
         records: list[EmailRecord] = []
 

@@ -1,4 +1,5 @@
 __all__ = [
+    'BaseCredential',
     'CaseMatch',
     'DropboxCredential',
     'DropboxManager',
@@ -14,14 +15,27 @@ __all__ = [
 ]
 
 
+from dataclasses import dataclass
+
 from .dbx_manager import DropboxManager
 from .email_state import EmailState
 from .error_tracking import ErrorTracker
 from .index_cache import IndexCache
 from .msal_manager import MSALManager
 from .notifications import Notifier
-from .oauth_manager import OAuthCredential
+from .oauth_credential import OAuthCredential
 from .target_finder import CaseMatch, FolderMatcher, PartyExtractor
 
 type MSALCredential = OAuthCredential[MSALManager]
 type DropboxCredential = OAuthCredential[DropboxManager]
+
+
+@dataclass
+class BaseCredential:
+    type: str
+    client_id: str
+    client_secret: str
+    token_type: str
+    scope: str
+    access_token: str
+    refresh_token: str

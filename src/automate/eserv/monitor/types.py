@@ -6,7 +6,6 @@ __all__ = [
     'EmailProcessor',
     'GetQueryParameter',
     'GraphClient',
-    'MSGraphQueryRequest',
     'MailFolder',
     'MailFoldersRequestBuilder',
     'Message',
@@ -32,13 +31,28 @@ from msgraph.generated.users.item.user_item_request_builder import UserItemReque
 
 from .client import GraphClient
 from .processor import EmailProcessor
-from .request import MSGraphQueryRequest
 
 
 class GetQueryParameter(Protocol):
     __dataclass_fields__: ClassVar[dict[str, Any]]
 
     def get_query_parameter(self, original_name: str) -> str: ...
+
+
+class CollectionResponse[T](Protocol):
+    value: list[T] | None
+
+
+class ItemResponse[T](Protocol):
+    value: T | None
+
+
+type Response[T] = CollectionResponse[T] | ItemResponse[T]
+
+
+class BuilderProto[T](Protocol):
+    async def get(self, request_configuration: RequestConfiguration[Any]) -> Response[T] | None: ...
+    def with_url(self, raw_url: str) -> Any: ...
 
 
 StatusFlag = NewType('StatusFlag', dict[Literal['id', 'value'], str])

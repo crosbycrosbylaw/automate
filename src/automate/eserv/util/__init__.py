@@ -19,5 +19,5 @@ from .email_state import get_state_tracker
 from .error_tracking import get_error_tracker
 from .index_cache import get_dbx_index_cache
 from .notifications import get_notifier
-from .oauth_manager import make_oauth_credential
+from .oauth_credential import make_oauth_credential
 from .target_finder import get_dbx_folder_matcher

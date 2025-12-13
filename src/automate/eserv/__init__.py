@@ -24,6 +24,7 @@ __all__ = [
     'new_msal_credential',
     'parse_credential_json',
     'process_pipeline_result',
+    'raise_from_auth_response',
     'stage',
     'status',
     'status_flag_factory',

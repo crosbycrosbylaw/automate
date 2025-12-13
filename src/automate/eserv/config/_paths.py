@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import enum
+from sys import stdin
+
+from zmq import Enum
+
 __all__ = ['PathsConfig']
 
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from dotenv import load_dotenv
 
@@ -17,24 +22,60 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
+class EnvStatus(Enum):
+    SUCCESS = enum.auto()
+    ERROR = enum.auto()
+
+    @classmethod
+    def from_path(cls, dotenv_path: PathLike[str] | None) -> EnvStatus:
+        if load_dotenv(dotenv_path, override=bool(dotenv_path)):
+            return cls.SUCCESS
+        return cls.ERROR
+
+
+def _validate_path(strpath: str | None, parent: Path) -> Path | None:
+    if strpath is None:
+        return None
+
+    try:
+        path = parent.joinpath(strpath).resolve(strict=True)
+    except FileNotFoundError:
+        return None
+    else:
+        return path
+
+
 @dataclass(frozen=True)
 class PathsConfig:
     """File storage paths."""
 
-    _status: ClassVar[bool | None] = None
+    _instance: ClassVar[Self | None] = None
+
+    _env_path: ClassVar[PathLike[str] | None] = None
+    _env_status: ClassVar[EnvStatus | None] = None
 
     @classmethod
-    def get_status(cls) -> bool | None:
-        return cls._status
+    def check_env(cls) -> bool:
+        return cls._env_status == EnvStatus.SUCCESS
+
+    @classmethod
+    def env_path(cls) -> Path | None:
+        if cls._env_path:
+            return Path(cls._env_path).resolve(strict=True)
+        return None
+
+    @classmethod
+    def default(cls) -> Self:
+        return cls(cls._env_path)
 
     dotenv_path: InitVar[PathLike[str] | None]
 
     def __new__(cls, dotenv_path: PathLike[str] | None = None) -> PathsConfig:
-        cls._status = load_dotenv(dotenv_path, override=bool(dotenv_path))
-        config = super().__new__(cls)
-        if dotenv_path is not None:
-            object.__setattr__(config, 'dotenv', dotenv_path)
-        return config
+        if not cls._instance or cls._env_path != dotenv_path:
+            cls._env_path = dotenv_path
+            cls._env_status = EnvStatus.from_path(dotenv_path)
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     root: Path = field(
         init=False,
@@ -61,6 +102,10 @@ class PathsConfig:
     _index: str = field(
         init=False,
         default_factory=env_var(key='INDEX_FILE', default='index.json'),
+    )
+    _private_key: str | None = field(
+        init=False,
+        default_factory=env_var(key='CERT_PRIVATE_KEY_PATH', optional=True),
     )
 
     @cached_property
@@ -97,5 +142,22 @@ class PathsConfig:
             path.touch()
         return path
 
+    @cached_property
+    def private_key(self) -> Path:
+        if path := _validate_path(self._private_key, self.root):
+            return path
+
+        if path := stdin.isatty() and _validate_path(
+            strpath=input('Enter CERT_PRIVATE_KEY_PATH: '),
+            parent=self.root,
+        ):
+            return path
+
+        raise MissingVariableError('CERT_PRIVATE_KEY_PATH')
+
     def resolve(self, *segments: PathLike[str]) -> Path:
         return self.root.joinpath(*segments).resolve()
+
+
+def get_paths() -> PathsConfig:
+    return PathsConfig.default()

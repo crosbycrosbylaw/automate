@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = ['Config']
 
-from dataclasses import dataclass, field, fields
+from dataclasses import InitVar, dataclass, field, fields
 from typing import TYPE_CHECKING, no_type_check
 
 from rampy import make_factory
@@ -15,9 +15,8 @@ from ._paths import PathsConfig
 
 if TYPE_CHECKING:
     from os import PathLike
-    from pathlib import Path
 
-    from automate.eserv.types.typechecking import SMTPConfig
+    from automate.eserv.types.typechecking import BaseConfig, MonitoringConfig, SMTPConfig
 
     from .utils import EmailAddress
 
@@ -53,9 +52,9 @@ class SMTPFields:
 
 @dataclass(frozen=True, init=False)
 class BaseFields:
-    dotenv_path: Path | None = field(default=None)
     index_max_age: int = field(default_factory=int_env_var('INDEX_CACHE_TTL_HOURS', 4))
     manual_review_folder: str = field(default_factory=env_var('MANUAL_REVIEW_FOLDER', '/MANUAL_REVIEW/'))
+    certificate_thumbprint: str | None = field(default_factory=env_var('CERT_THUMBPRINT', optional=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +71,8 @@ class Config(
 
     """
 
+    dotenv_path: InitVar[PathLike[str] | None] = None
+
     paths: PathsConfig = field(init=False)
     creds: CredentialsConfig = field(init=False)
 
@@ -79,26 +80,47 @@ class Config(
         config = super().__new__(cls)
         object.__setattr__(config, 'paths', (paths := PathsConfig(dotenv_path=dotenv_path)))
         object.__setattr__(config, 'creds', CredentialsConfig(paths.credentials))
+
+        config.print()
         return config
 
-    def __post_init__(self) -> None:
-        """Print basic configuration information to the console after initialization."""
+    @no_type_check
+    def smtp(self) -> SMTPConfig:
+        return {
+            f.name.removeprefix('smtp_'): getattr(self, f.name)
+            for f in fields(self)
+            if f.name.startswith('smtp_')
+        }
+
+    @no_type_check
+    def monitoring(self) -> MonitoringConfig:
+        return {
+            f.name.removeprefix('monitor_'): getattr(self, f.name)
+            for f in fields(self)
+            if f.name.startswith('monitor_')
+        }
+
+    @no_type_check
+    def base(self) -> BaseConfig:
+        return {f.name: getattr(self, f.name) for f in fields(self) if f.name}
+
+    def print(self) -> None:
         console.info(
             event='configuration loaded',
-            dotenv_path=f'{self.dotenv_path!s}',
+            dotenv_path=f'{self.paths.env_path()!s}',
             service_dir=f'{self.paths.service!s}',
             cache_ttl=f'{self.index_max_age!s}',
             smtp_server=self.smtp_server,
         )
 
-    @no_type_check
-    def smtp(self) -> SMTPConfig:
-        prefix = 'smtp_'
-        return {
-            f.name.removeprefix(prefix): getattr(self, f.name)
-            for f in fields(self)
-            if f.name.startswith(prefix)
-        }
+    @staticmethod
+    def default() -> Config:
+        dotenv_path = PathsConfig.env_path()
+        return Config(dotenv_path=dotenv_path)
 
 
 configure = make_factory(Config)
+
+
+def get_config() -> Config:
+    return Config.default()

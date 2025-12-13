@@ -122,7 +122,6 @@ pixi run push
     -   `refresh()` method orchestrates token refresh via handlers
     -   `export()` serializes to flat JSON structure (excludes `msal_app`)
     -   `msal_app` field stores MSAL ConfidentialClientApplication instance (Outlook only)
-    -   `msal_migrated` flag tracks migration status (persisted to JSON)
 -   **Refresh handlers**:
     -   `_refresh_dropbox()` - Dropbox OAuth2 token refresh via `requests.post()`
     -   `_refresh_outlook_msal()` - Microsoft OAuth2 token refresh via MSAL
@@ -229,7 +228,6 @@ pixi run push
 -   **Fixed walrus operator bug** - Corrected scope filtering logic in `_refresh_outlook_msal()`
 -   **Fixed `export()` method** - Manual dict construction avoids issues with `init=False` fields like `_manager`
 -   **Updated all test mocks** - Proper patching at module level (`automate.eserv.util.msal_manager.ConfidentialClientApplication`)
--   **Fixed `msal_migrated` flag handling** - Now correctly updates `extra_properties` dict instead of using `replace()`
 
 **Test results:** All 142 tests passing (was 20 failing, now 0)
 
@@ -250,7 +248,6 @@ pixi run push
 -   **MSAL integration** - Added `msal_app` field to OAuthCredential for storing ConfidentialClientApplication instance
 -   **Automatic migration** - Existing refresh tokens automatically migrated on first refresh via `acquire_token_by_refresh_token()`
 -   **Silent refresh** - Post-migration refreshes use `acquire_token_silent()` with MSAL's account cache
--   **Migration tracking** - New `msal_migrated` boolean field persisted to credentials.json
 -   **Backward compatibility** - Old credentials.json format automatically upgraded on first load
 -   **Comprehensive testing** - Added 11 new tests in TestMSALIntegration class covering migration, silent refresh, fallback logic, and dual-mode operation
 
@@ -260,7 +257,6 @@ pixi run push
 -   MSAL app initialized on credential load for Outlook, recreated each session (not persisted)
 -   Three-tier fallback: `acquire_token_silent()` → `acquire_token_by_refresh_token()` → error
 -   `export()` method excludes `msal_app` from JSON serialization (ephemeral)
--   `_refresh()` method sets `msal_migrated=True` after first successful refresh
 
 **Benefits:**
 

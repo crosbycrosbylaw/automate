@@ -5,11 +5,11 @@ __all__ = ['CredentialsConfig']
 import threading
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, overload
 
 import orjson
 
-from automate.eserv.util.oauth_manager import OAuthCredential
+from automate.eserv.util.oauth_credential import OAuthCredential
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,10 +48,17 @@ def parse_credential_json(
 class CredentialsConfig:
     """Manages OAuth credentials for Dropbox and Outlook."""
 
+    _instance: ClassVar[Self | None] = None
+
     path: Path = field(metadata={'updated_at': None})
 
     _mapping: dict[CredentialType, OAuthCredential[Any]] = field(init=False, default_factory=dict)
     _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
+
+    def __new__(cls) -> Self:
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __post_init__(self) -> None:
         """Initialize the credential manager."""
@@ -116,9 +123,6 @@ class CredentialsConfig:
         """
         refreshed = cred.refresh()
 
-        if cred.type == 'msal':
-            refreshed.properties.setdefault('msal_migrated', True)
-
         with self._lock:
             self._mapping[cred.type] = refreshed
             self.persist()
@@ -136,3 +140,9 @@ class CredentialsConfig:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
         self.__dataclass_fields__['json_path'].metadata['updated_at'] = datetime.now(UTC)
+
+
+def get_credentials() -> CredentialsConfig:
+    from ._paths import get_paths
+
+    return CredentialsConfig(get_paths().credentials)

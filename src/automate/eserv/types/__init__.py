@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 __all__ = [
+    'AuthError',
     'BatchResult',
     'CaseMatch',
     'Config',
@@ -41,7 +42,7 @@ __all__ = [
 ]
 
 
-from automate.eserv.config.main import Config
+from automate.eserv.config.main import *
 from automate.eserv.config.types import *
 from automate.eserv.errors.types import *
 from automate.eserv.monitor.types import *
@@ -53,11 +54,13 @@ from .structs import *
 
 if TYPE_CHECKING:
     __all__ += [
+        'BaseConfig',
         'CredentialType',
         'CredentialsJSON',
         'DropboxCredential',
         'ErrorDict',
         'MSALCredential',
+        'MonitoringConfig',
         'ProcessStatus',
         'ProcessedResultDict',
         'SMTPConfig',

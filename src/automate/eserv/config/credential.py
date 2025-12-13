@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from automate.eserv.util.dbx_manager import DropboxManager
 from automate.eserv.util.msal_manager import MSALManager
-from automate.eserv.util.oauth_manager import OAuthCredential
+from automate.eserv.util.oauth_credential import OAuthCredential
 
 if TYPE_CHECKING:
     from automate.eserv.types import DropboxCredential, MSALCredential

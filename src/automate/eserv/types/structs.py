@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
-    from automate.eserv.util.oauth_manager import OAuthCredential
+    from automate.eserv.util.oauth_credential import OAuthCredential
 
 
 @dataclass(frozen=True, slots=True)

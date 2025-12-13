@@ -1,4 +1,5 @@
 __all__ = [
+    'AuthError',
     'DocumentDownloadError',
     'DocumentExtractionError',
     'DocumentUploadError',
@@ -10,5 +11,6 @@ __all__ = [
     'PipelineStage',
 ]
 
+from .authentication import *
 from .environment import *
 from .pipeline import *

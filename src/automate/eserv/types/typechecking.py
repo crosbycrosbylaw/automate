@@ -4,9 +4,11 @@ import typing
 
 if typing.TYPE_CHECKING:
     __all__ = [
+        'BaseConfig',
         'CredentialType',
         'CredentialsJSON',
         'ErrorDict',
+        'MonitoringConfig',
         'ProcessStatus',
         'ProcessedResultDict',
         'SMTPConfig',
@@ -72,3 +74,14 @@ if typing.TYPE_CHECKING:
         username: str | None
         password: str | None
         use_tls: bool
+
+    @type_check_only
+    class MonitoringConfig(TypedDict):
+        num_days: int
+        mail_folder_path: list[str]
+
+    @type_check_only
+    class BaseConfig(TypedDict):
+        index_max_age: int
+        manual_review_folder: str
+        certificate_thumbprint: str | None

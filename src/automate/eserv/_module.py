@@ -9,7 +9,7 @@ from rampy import make_factory
 from automate.eserv.types.enums import PipelineStage, UploadStatus
 from automate.eserv.util.dbx_manager import DropboxManager
 from automate.eserv.util.msal_manager import MSALManager
-from automate.eserv.util.oauth_manager import OAuthCredential
+from automate.eserv.util.oauth_credential import OAuthCredential
 
 DropboxCredential = partial(OAuthCredential[DropboxManager], factory=DropboxManager, type='dropbox')
 MSALCredential = partial(OAuthCredential[MSALManager], factory=MSALManager, type='msal')

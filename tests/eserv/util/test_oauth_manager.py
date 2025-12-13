@@ -66,7 +66,6 @@ def microsoft_credential():
         access_token='old_outlook_token',
         refresh_token='outlook_refresh_token',
         expires_at=datetime.now(UTC) - timedelta(hours=1),  # Expired
-        properties={'msal_migrated': False},
     )
 
 
@@ -245,8 +244,6 @@ class TestTokenRefresh:
         microsoft_credential: OAuthCredential[MSALManager],
     ):
         """Test successful Outlook token refresh using MSAL (migration mode)."""
-        microsoft_credential['msal_migrated'] = False
-
         mock_client = msal_refresh_test_case(
             microsoft_credential,
             accounts=[],
@@ -754,12 +751,8 @@ class TestMSALIntegration:
         # Get credential (triggers refresh)
         cred = manager.msal
 
-        assert cred['msal_migrated'] is True
-
         with creds_file.open('rb') as f:
             saved_data = orjson.loads(f.read())
-
-        assert saved_data[0]['msal_migrated'] is True
 
     def test_msal_silent_refresh_after_migration(
         self,
@@ -769,8 +762,6 @@ class TestMSALIntegration:
         """Test silent refresh used after migration."""
         # Create migrated Outlook credential
         creds_file = directory / 'credentials.json'
-
-        microsoft_credential['msal_migrated'] = True
 
         mock_ms_app = msal_refresh_test_case(
             microsoft_credential,
@@ -798,7 +789,6 @@ class TestMSALIntegration:
         microsoft_credential: OAuthCredential[MSALManager],
     ):
         """Test fallback to refresh token when silent fails."""
-        microsoft_credential.properties['msal_migrated'] = True
         cred = microsoft_credential
 
         mock_account = {'username': 'user@example.com'}
@@ -828,9 +818,6 @@ class TestMSALIntegration:
         microsoft_credential: OAuthCredential[MSALManager],
     ):
         """Test fallback when account cache is empty."""
-        # Set msal_migrated to True so get_accounts is called
-        microsoft_credential['msal_migrated'] = True
-
         mock_app = msal_refresh_test_case(
             microsoft_credential,
             accounts=[],
@@ -892,13 +879,8 @@ class TestMSALIntegration:
     ):
         """Test msal_app excluded from export."""
         cred = microsoft_credential
-        cred.properties['msal_migrated'] = True
 
         exported = cred.export()
-
-        # Assert msal_migrated included
-        assert 'msal_migrated' in exported
-        assert exported['msal_migrated'] is True
 
     def test_msal_app_recreated_on_load(self, directory: Path):
         """Test MSAL app recreated on each load."""
@@ -913,7 +895,6 @@ class TestMSALIntegration:
                 'scope': 'Mail.Read offline_access',
                 'access_token': 'token',
                 'refresh_token': 'refresh',
-                'msal_migrated': True,
             },
         ]
 
@@ -963,7 +944,6 @@ class TestMSALIntegration:
                 'access_token': 'token',
                 'refresh_token': 'refresh',
                 'expires_at': (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
-                'msal_migrated': False,
             },
         ]
 
@@ -989,7 +969,6 @@ class TestMSALIntegration:
 
             # First refresh (migration)
             cred1 = manager.msal
-            assert cred1['msal_migrated'] is True
 
             # Force second refresh by manually updating the credential expiry
             cred1_dict = cred1.export()
@@ -1005,7 +984,6 @@ class TestMSALIntegration:
 
             # Second refresh (normal mode)
             cred2 = manager.msal
-            assert cred2['msal_migrated'] is True  # Still True
 
     def test_dual_mode_dropbox_unaffected(self, directory: Path):
         """Test Dropbox credentials unaffected by MSAL integration."""
@@ -1071,7 +1049,6 @@ class TestMSALIntegration:
 
             # Assert Dropbox uses SDK refresh (not MSAL)
             mock_dbx.check_and_refresh_access_token.assert_called_once()
-            assert dbx_cred['msal_migrated'] is None  # Default value
             assert dbx_cred.access_token == 'new_dbx_token'
 
             # Refresh Outlook credential
@@ -1080,7 +1057,6 @@ class TestMSALIntegration:
             # Assert Outlook uses MSAL
             mock_msal_app.acquire_token_by_refresh_token.assert_called_once()
             assert outlook_cred.manager.client is not None
-            assert outlook_cred['msal_migrated'] is True
             assert outlook_cred.access_token == 'new_outlook_token'
 
 
