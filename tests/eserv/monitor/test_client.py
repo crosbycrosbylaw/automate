@@ -10,70 +10,15 @@ Tests cover:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from automate.eserv.config.utils import get_example_env_dict
 from automate.eserv.monitor.client import GraphClient, make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
-    from pathlib import Path
-
-
-@pytest.fixture
-def mock_config(directory: Path) -> Config:
-    """Create test config with environment file."""
-    from datetime import UTC, datetime, timedelta
-
-    import orjson
-
-    from automate.eserv import configure
-
-    # Create credentials file with future expiration
-    future_time = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
-    creds_file = directory / 'credentials.json'
-    creds_data = [
-        {
-            'type': 'dropbox',
-            'account': 'test@example.com',
-            'client_id': 'test-dropbox-client-id',
-            'client_secret': 'test-dropbox-client-secret',
-            'access_token': 'test-dropbox-access-token',
-            'token_type': 'bearer',
-            'expires_at': future_time,
-            'refresh_token': 'test-dropbox-refresh-token',
-            'scope': 'account_info.read files.content.read files.content.write files.metadata.read',
-        },
-        {
-            'type': 'msal',
-            'account': 'test@example.com',
-            'client_id': 'test-msal-client-id',
-            'client_secret': 'test-msal-client-secret',
-            'token_type': 'Bearer',
-            'scope': 'Mail.ReadWrite openid profile email',
-            'expires_at': future_time,
-            'access_token': 'test-msal-access-token',
-            'refresh_token': 'test-msal-refresh-token',
-        },
-    ]
-    creds_file.write_bytes(orjson.dumps(creds_data))
-
-    env_dict = get_example_env_dict()
-    env_dict['CREDENTIALS_FILE'] = str(creds_file)
-    env_file = directory.joinpath('.env.example').resolve()
-    env_file.touch(exist_ok=True)
-    env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_dict.items()))
-
-    config = configure(env_file)
-    # Override folder path for testing
-    object.__setattr__(config, 'monitor_mail_folder_path', ['Inbox', 'Test'])
-    return config
 
 
 @pytest.fixture
@@ -152,9 +97,11 @@ class TestFolderResolution:
             mock_request = Mock()
             mock_request.get = AsyncMock(return_value=[])
 
-            with patch.object(graph_client, 'request', return_value=mock_request):
-                with pytest.raises(FileNotFoundError):
-                    await graph_client._resolve_monitoring_folder_id()
+            with (
+                patch.object(graph_client, 'request', return_value=mock_request),
+                pytest.raises(FileNotFoundError),
+            ):
+                await graph_client._resolve_monitoring_folder_id()
 
 
 class TestFetchUnprocessedEmails:
@@ -225,9 +172,7 @@ class TestFetchUnprocessedEmails:
         mock_request.collect = AsyncMock(return_value=[msg1, msg2])
 
         with patch.object(graph_client, 'request', return_value=mock_request):
-            records = await graph_client.fetch_unprocessed_emails(
-                processed_uids={'msg-processed'}
-            )
+            records = await graph_client.fetch_unprocessed_emails(processed_uids={'msg-processed'})
 
             # Should only return the new message
             assert len(records) == 1
@@ -250,9 +195,11 @@ class TestFetchUnprocessedEmails:
         mock_request = Mock()
         mock_request.collect = AsyncMock(return_value=[msg])
 
-        with patch.object(graph_client, 'request', return_value=mock_request):
-            with pytest.raises(ValueError, match='Missing HTML body'):
-                await graph_client.fetch_unprocessed_emails(processed_uids=set())
+        with (
+            patch.object(graph_client, 'request', return_value=mock_request),
+            pytest.raises(ValueError, match='Missing HTML body'),
+        ):
+            await graph_client.fetch_unprocessed_emails(processed_uids=set())
 
 
 class TestApplyFlag:
@@ -320,16 +267,16 @@ class TestRequestBuilder:
         mock_response2.odata_next_link = None
         mock_response2.value = [Mock(id='item2')]
 
-        async def mock_get_side_effect(*args, **kwargs):
-            if not hasattr(mock_get_side_effect, 'call_count'):
-                mock_get_side_effect.call_count = 0
-            mock_get_side_effect.call_count += 1
+        mock_get = AsyncMock()
 
-            if mock_get_side_effect.call_count == 1:
-                return mock_response1
-            return mock_response2
+        async def mock_get_side_effect(*_args, **_kwds):
+            await asyncio.sleep(1)
+            mock_get.call_count = getattr(mock_get, 'call_count', 0) + 1
+            return mock_response1 if mock_get.call_count == 1 else mock_response2
 
-        mock_builder.get = AsyncMock(side_effect=mock_get_side_effect)
+        mock_get.side_effect = mock_get_side_effect
+        mock_builder.get = mock_get
+
         mock_builder.with_url = Mock(return_value=mock_builder)
 
         request = graph_client.request(mock_builder)

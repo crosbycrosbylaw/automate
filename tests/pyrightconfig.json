@@ -4,5 +4,6 @@
     "reportUnknownLambdaType": "none",
     "reportUnknownMemberType": "none",
     "reportUnknownParameterType": "none",
-    "reportUnknownVariableType": "none"
+    "reportUnknownVariableType": "none",
+    "reportAttributeAccessIssue": "information"
 }

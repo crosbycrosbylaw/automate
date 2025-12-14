@@ -13,9 +13,8 @@ if typing.TYPE_CHECKING:
     from pathlib import Path
 
     from automate.eserv.types import EmailRecord
-    from tests.eserv.monitor.test_client import Mocked
 
-from dataclasses import fields, replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
@@ -23,6 +22,8 @@ from unittest.mock import Mock
 from automate.eserv import *
 from automate.eserv.core import *
 from automate.eserv.types import *
+
+type Mocked[T] = Mock | T
 
 directory = test.directory
 
@@ -45,6 +46,7 @@ SMTP_TO_ADDR=test@example.com
 MONITORING_FOLDER_PATH=Inbox,File Handling - All,Filing Accepted / Notification of Service / Courtesy Copy
 CERT_PRIVATE_KEY_PATH=
 """
+
 
 def _make_mock_credentials() -> str:
     from datetime import UTC, datetime, timedelta
@@ -155,7 +157,9 @@ def mock_creds(mock_paths: Mocked[PathsConfig]) -> Mocked[CredentialsConfig]:
 
 @pytest.fixture
 def mock_config(
-    mock_dotenv_path: Path, mock_paths: PathsConfig, mock_creds: CredentialsConfig
+    mock_dotenv_path: Path,
+    mock_paths: PathsConfig,
+    mock_creds: CredentialsConfig,
 ) -> Mocked[Config]:
     import dotenv
 
@@ -167,12 +171,13 @@ def mock_config(
     monitoring_fields = MonitoringFields()
     smtp_fields = SMTPFields()
 
-    configuration = {'paths': mock_paths, 'creds': mock_creds}
+    configuration = {
+        'paths': mock_paths,
+        'creds': mock_creds,
+    }
 
-    for f in fields(Config):
-        for obj in base_fields, monitoring_fields, smtp_fields:
-            if hasattr(obj, f.name):
-                configuration[f.name] = getattr(obj, f.name)
+    for obj in base_fields, monitoring_fields, smtp_fields:
+        configuration.update(asdict(obj))
 
     mock_config = Mock(spec=Config)
     mock_config.configure_mock(**configuration)

@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextvars
 from datetime import UTC, datetime
 from os import PathLike
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
@@ -122,12 +121,9 @@ class Pipeline:
 
     stage: stage = stage.INITIALIZATION
 
-    def __init__(self, dotenv_path: PathLike[str] | Path | None = None) -> None:
+    def __init__(self, dotenv_path: PathLike[str] | None = None) -> None:
         """Initialize pipeline with configuration."""
-        if isinstance(dotenv_path, PathLike):
-            dotenv_path = Path(dotenv_path)
-
-        self.config = configure(dotenv_path)
+        self.config = configure(dotenv_path=dotenv_path)
         self.state = get_state_tracker(self.config.paths.state)
         self.tracker = get_error_tracker(self.config.paths.error_log)
 

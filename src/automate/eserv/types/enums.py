@@ -1,6 +1,7 @@
-__all__ = ['PipelineStage', 'UploadStatus']
+__all__ = ['EnvStatus', 'PipelineStage', 'UploadStatus']
 from enum import Enum
 
+from automate.eserv.config._paths import EnvStatus
 from automate.eserv.errors.pipeline import PipelineStage
 
 

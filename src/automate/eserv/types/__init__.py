@@ -17,6 +17,7 @@ __all__ = [
     'EmailProcessor',
     'EmailRecord',
     'EmailState',
+    'EnvStatus',
     'ErrorTracker',
     'FolderMatcher',
     'FolderResolutionError',

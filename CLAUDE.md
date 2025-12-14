@@ -107,33 +107,57 @@ pixi run push
 -   **`_core.py`** - `PipelineError`: Exception with stage and error info
 -   **`_config.py`** - Config-specific exceptions: `MissingVariableError`, `InvalidFormatError`
 
-**Credential Management (`util/oauth_manager.py`):**
+**Configuration (`config/`):**
 
--   **`CredentialsConfig`** - Dual-mode OAuth2 token management for Dropbox + Outlook
-    -   Dropbox: Manual OAuth2 refresh using `requests.post()`
-    -   Outlook: MSAL-powered refresh with automatic token caching
-    -   Lazy token refresh (within 5 min of expiry)
-    -   Thread-safe credential updates with locking
-    -   Automatic persistence on refresh
+-   **`main.py:Config`** - Root configuration class (singleton pattern)
+    -   Inherits from `MonitoringFields`, `SMTPFields`, `BaseFields` dataclasses
+    -   Uses `__new__` for singleton initialization
+    -   Lazy initialization of `paths: PathsConfig` and `creds: CredentialsConfig`
+    -   Methods: `smtp()`, `monitoring()`, `base()` return typed dicts
+    -   All fields use `field(default_factory=env_var(...))` for lazy loading from environment
+-   **`_paths.py:PathsConfig`** - File storage paths (singleton pattern)
+    -   Uses `__new__` for singleton instance management
+    -   Lazy environment loading via `EnvStatus.from_path()` in `__new__`
+    -   All paths use `cached_property` for lazy initialization
+    -   Auto-creates missing directories (service, state, error_log, index)
+    -   Certificate private key with fallback to stdin prompt
+-   **`_credentials.py:CredentialsConfig`** - OAuth2 credential manager (singleton pattern)
+    -   Lazy credential loading via `__getattr__` with automatic refresh
+    -   Thread-safe credential updates with locking (`_lock: Lock`)
+    -   Automatic persistence on refresh via `persist()` method
     -   Flat JSON serialization (no nested dicts)
--   **`OAuthCredential`** - Immutable credential dataclass
-    -   Pure data container (no client storage for Dropbox; MSAL app for Outlook)
-    -   `update_from_refresh()` method creates new instances (immutable pattern)
-    -   `refresh()` method orchestrates token refresh via handlers
-    -   `export()` serializes to flat JSON structure (excludes `msal_app`)
-    -   `msal_app` field stores MSAL ConfidentialClientApplication instance (Outlook only)
--   **Refresh handlers**:
-    -   `_refresh_dropbox()` - Dropbox OAuth2 token refresh via `requests.post()`
-    -   `_refresh_outlook_msal()` - Microsoft OAuth2 token refresh via MSAL
-        -   Migration mode: First refresh uses `acquire_token_by_refresh_token()`
-        -   Normal mode: Subsequent refreshes use `acquire_token_silent()` with account cache
-        -   Three-tier fallback: silent → refresh_token → error
+    -   Credential factory pattern: `parse_credential_json()` dispatches to `new_dropbox_credential()` or `new_msal_credential()`
+    -   `__getitem__` for direct cache access (no refresh)
+    -   `__getattr__` for auto-refreshing access
+
+**Credential Management:**
+
+-   **`util/oauth_credential.py:OAuthCredential[T]`** - Generic credential dataclass
+    -   Type parameter `T` bound to `TokenManager` protocol
+    -   Factory pattern: `factory: Callable[[Self], T]` field creates manager instances
+    -   `manager` cached property lazily creates typed manager (DropboxManager or MSALManager)
+    -   `refresh()` delegates to `manager._refresh_token()` and reconstructs credential
+    -   `reconstruct()` creates new instances with updated token data (immutable pattern)
+    -   `export()` serializes to flat JSON structure (excludes internal fields)
+    -   Properties dict for extensibility (authority, tenant_id, etc.)
+    -   Implements `__str__` (returns access_token), `__int__` (returns expiration timestamp)
+    -   `get_token()` returns Azure `AccessToken` for SDK compatibility
+-   **Manager implementations**:
+    -   **`util/dbx_manager.py:DropboxManager`** - Dropbox client wrapper
+        -   Implements `TokenManager[Dropbox]` protocol
+        -   `_refresh_token()` uses Dropbox SDK's `check_and_refresh_access_token()`
+        -   Lazy client initialization from credential via `client` property
+        -   `index()` method fetches folder hierarchy from `/Clio/` with pagination
+        -   `upload()` method uploads files with overwrite mode
+    -   **`util/msal_manager.py:MSALManager`** - Microsoft authentication wrapper
+        -   Implements `TokenManager[ConfidentialClientApplication]` protocol
+        -   Implements Azure `TokenCredential` protocol
+        -   `_refresh_token()` three-tier fallback: silent → refresh_token → client credentials
+        -   Certificate or secret-based authentication via `_build_app_cred()`
+        -   Reserved scope filtering (`offline_access`, `openid`, `profile`)
+        -   Lazy MSAL app initialization from credential via `client` property
 
 **Utility Subpackage (`util/`):**
-
--   **`configuration.py`** - Configuration management with nested dataclasses
-    -   `SMTPConfig`, `CredentialConfig`, `PathsConfig`, `EmailStateConfig`, `CacheConfig`, `MonitoringConfig`
-    -   Lazy credential loading via `CredentialConfig[cred_type]`
 -   **`email_state.py`** - `EmailState`: UID-based audit log for processed emails
     -   Fresh start (no weekly rotation, UID primary key)
     -   Overloaded `record()` for flexible input types
