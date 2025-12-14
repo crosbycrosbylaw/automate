@@ -55,7 +55,7 @@ class CredentialsConfig:
     _mapping: dict[CredentialType, OAuthCredential[Any]] = field(init=False, default_factory=dict)
     _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
 
-    def __new__(cls) -> Self:
+    def __new__(cls, path: Path) -> Self:
         if not cls._instance:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -109,6 +109,10 @@ class CredentialsConfig:
 
         This method automatically refreshes expired credentials.
         """
+        # Handle special attributes that should not trigger credential lookup
+        if name.startswith('_'):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
         with self._lock:
             cred = self._mapping[name]
             return cred if not cred.outdated else self._refresh(cred)
@@ -139,7 +143,7 @@ class CredentialsConfig:
         with self.path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
-        self.__dataclass_fields__['json_path'].metadata['updated_at'] = datetime.now(UTC)
+        self.__dataclass_fields__['path'].metadata['updated_at'] = datetime.now(UTC)
 
 
 def get_credentials() -> CredentialsConfig:

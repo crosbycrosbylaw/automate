@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ['Config']
 
+import dataclasses
 from dataclasses import InitVar, dataclass, field, fields
 from typing import TYPE_CHECKING, no_type_check
 
@@ -78,8 +79,17 @@ class Config(
 
     def __new__(cls, dotenv_path: PathLike[str] | None = None) -> Config:
         config = super().__new__(cls)
+
+        # Initialize paths first (triggers env loading)
         object.__setattr__(config, 'paths', (paths := PathsConfig(dotenv_path=dotenv_path)))
-        object.__setattr__(config, 'creds', CredentialsConfig(paths.credentials))
+
+        # Initialize all fields with default_factory (since __init__ is bypassed)
+        for f in fields(cls):
+            if f.init and f.default_factory is not dataclasses.MISSING:  # type: ignore
+                object.__setattr__(config, f.name, f.default_factory())
+
+        # Initialize credentials last (requires paths.credentials)
+        object.__setattr__(config, 'creds', CredentialsConfig(path=paths.credentials))
 
         config.print()
         return config

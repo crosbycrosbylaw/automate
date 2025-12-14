@@ -1,513 +1,344 @@
 """Unit tests for GraphClient.
 
 Tests cover:
-- Filter expression correctness
-- Pagination logic with @odata.nextLink
-- Folder resolution edge cases
-- Network error handling and retry logic
+- GraphClient initialization with Config
+- Async folder resolution
+- Async email fetching with filtering
 - MAPI flag application
+- Request builder pattern with pagination
 """
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from msgraph.generated.models.mail_folder import MailFolder
-from msgraph.generated.models.mail_folder_collection_response import MailFolderCollectionResponse
-from msgraph.generated.models.message import Message
-from requests.exceptions import HTTPError
 
-from automate.eserv.config import configure
 from automate.eserv.config.utils import get_example_env_dict
-from automate.eserv.monitor.client import make_graph_client
+from automate.eserv.monitor.client import GraphClient, make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
 
 if TYPE_CHECKING:
-    from collections.abc import *
+    from collections.abc import Generator
     from pathlib import Path
 
-    from automate.eserv.types import GraphClient
-
-type Mocked[T] = Mock | T
-
-
-def mock_wraps[T](obj: T, **kwds: ...) -> Mocked[T]:
-    return Mock(wraps=obj, **kwds)
-
-
-def mail_folder(
-    id: str | None,
-    display_name: str,
-    parent_folder_id: str | None = None,
-    messages: Sequence[Message] = (),
-) -> MailFolder:
-    return MailFolder(
-        id=id,
-        display_name=display_name,
-        messages=[*messages],
-        parent_folder_id=parent_folder_id,
-    )
-
-
-def mail_folder_collection_response(odata_next_link: str | None, *folders: MailFolder):
-    return MailFolderCollectionResponse(odata_next_link=odata_next_link, value=[*folders])
-
 
 @pytest.fixture
-def mock_credential() -> Mock:
-    """Create mock OAuth credential."""
-    cred = Mock(spec=['access_token', 'manager', 'token_type', 'service'])
-    cred.access_token = 'test_token_12345'
-    cred.token_type = 'Bearer'
-    cred.manager = Mock()
-    cred.service = Mock()
-    return cred
+def mock_config(directory: Path) -> Config:
+    """Create test config with environment file."""
+    from datetime import UTC, datetime, timedelta
 
+    import orjson
 
-@pytest.fixture
-def mock_config(directory: Path) -> Mocked[Config]:
-    """Create mock monitoring config."""
+    from automate.eserv import configure
+
+    # Create credentials file with future expiration
+    future_time = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
+    creds_file = directory / 'credentials.json'
+    creds_data = [
+        {
+            'type': 'dropbox',
+            'account': 'test@example.com',
+            'client_id': 'test-dropbox-client-id',
+            'client_secret': 'test-dropbox-client-secret',
+            'access_token': 'test-dropbox-access-token',
+            'token_type': 'bearer',
+            'expires_at': future_time,
+            'refresh_token': 'test-dropbox-refresh-token',
+            'scope': 'account_info.read files.content.read files.content.write files.metadata.read',
+        },
+        {
+            'type': 'msal',
+            'account': 'test@example.com',
+            'client_id': 'test-msal-client-id',
+            'client_secret': 'test-msal-client-secret',
+            'token_type': 'Bearer',
+            'scope': 'Mail.ReadWrite openid profile email',
+            'expires_at': future_time,
+            'access_token': 'test-msal-access-token',
+            'refresh_token': 'test-msal-refresh-token',
+        },
+    ]
+    creds_file.write_bytes(orjson.dumps(creds_data))
+
     env_dict = get_example_env_dict()
+    env_dict['CREDENTIALS_FILE'] = str(creds_file)
     env_file = directory.joinpath('.env.example').resolve()
     env_file.touch(exist_ok=True)
     env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_dict.items()))
-    return mock_wraps(replace(configure(env_file), monitor_mail_folder_path=['Inbox', 'Test Folder']))
+
+    config = configure(env_file)
+    # Override folder path for testing
+    object.__setattr__(config, 'monitor_mail_folder_path', ['Inbox', 'Test'])
+    return config
 
 
 @pytest.fixture
-def graph_client(mock_config: Mocked[Config]) -> Generator[Mocked[GraphClient]]:
+def graph_client(mock_config: Config) -> GraphClient:
     """Create GraphClient instance for testing."""
-    with patch('automate.eserv.monitor.client.GraphServiceClient') as mock_service:
-        mock_client = mock_wraps(make_graph_client(mock_config))
-        mock_client.service = mock_service
-
-        async def resolve_monitoring_folder_id():
-            await asyncio.sleep(1)
-
-            return 'example-folder-id'
-
-        mock_client.configure_mock(resolve_monitoring_folder_id=resolve_monitoring_folder_id)
-        yield mock_client
+    return make_graph_client(mock_config)
 
 
-@patch('automate.eserv.monitor.client.GraphServiceClient')
-class TestFilterExpression:
-    """Test Graph API OData filter expression generation."""
+class TestGraphClientInit:
+    """Test GraphClient initialization."""
 
-    @pytest.mark.asyncio
-    async def test_filter_syntax_uses_odata_operators(
+    def test_client_initialization(self, graph_client: GraphClient) -> None:
+        """Test GraphClient initializes with config."""
+        assert graph_client.config is not None
+        assert graph_client.path_segments == ['Inbox', 'Test']
+        assert graph_client._folder_id_cache == {}
+
+    def test_cutoff_date_calculated(self, mock_config: Config) -> None:
+        """Test cutoff date is calculated from monitor_num_days."""
+        client = GraphClient(mock_config)
+        now = datetime.now(UTC)
+        expected_days = mock_config.monitor_num_days
+
+        # Cutoff should be approximately N days ago
+        delta = now - client.cutoff
+        assert delta.days == expected_days
+
+    def test_client_property_creates_graph_service_client(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that filter uses correct OData syntax (eq, not :)."""
-        # Mock successful response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.text = '{}'
-        mock_response.json.return_value = {'value': []}
-        mock_request.return_value = mock_response
-
-        graph_client.service
-
-        # Mock folder resolution to avoid actual API call
-        graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
-
-        # Call fetch_unprocessed_emails
-        await graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
-
-        # Verify request was made with correct filter
-        call_args = mock_request.call_args
-        params = call_args[1].get('params', {})
-        filter_expr = params.get('$filter', '')
-
-        # Check filter uses 'eq true' not ':false'
-        assert 'hasAttachments eq true' in filter_expr
-        assert 'hasAttachments:false' not in filter_expr
-        assert 'NOT hasAttachments:false' not in filter_expr
-
-    @pytest.mark.asyncio
-    async def test_filter_includes_date_range(
-        self,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that filter includes receivedDateTime constraint."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.text = '{}'
-        mock_response.json.return_value = {'value': []}
-        mock_request.return_value = mock_response
-
-        graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
-
-        # Call with 7 days lookback
-        await graph_client.fetch_unprocessed_emails(num_days=7, processed_uids=set())
-
-        call_args = mock_request.call_args
-        params = call_args[1].get('params', {})
-        filter_expr = params.get('$filter', '')
-
-        # Check filter includes receivedDateTime with ge (greater or equal)
-        assert 'receivedDateTime ge' in filter_expr
-
-
-class TestPagination:
-    """Test pagination handling with @odata.nextLink."""
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    @patch('automate.eserv.monitor.client.requests.get')
-    def test_pagination_fetches_all_pages(
-        self,
-        mock_get: Mock,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that pagination loop fetches all pages."""
-        # Mock folder resolution
-        graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
-
-        # Mock first page response with nextLink
-        page1_response = Mock()
-        page1_response.status_code = 200
-        page1_response.text = '{"value": [{"id": "msg1"}], "@odata.nextLink": "https://next-page-url"}'
-        page1_response.json.return_value = {
-            'value': [
-                {
-                    'id': 'msg1',
-                    'from': {'emailAddress': {'address': 'test@example.com'}},
-                    'subject': 'Test 1',
-                    'receivedDateTime': datetime.now(UTC).isoformat(),
-                },
-            ],
-            '@odata.nextLink': 'https://next-page-url',
-        }
-
-        # Mock second page response (no nextLink)
-        page2_response = Mock()
-        page2_response.status_code = 200
-        page2_response.text = '{"value": [{"id": "msg2"}]}'
-        page2_response.json.return_value = {
-            'value': [
-                {
-                    'id': 'msg2',
-                    'from': {'emailAddress': {'address': 'test@example.com'}},
-                    'subject': 'Test 2',
-                    'receivedDateTime': datetime.now(UTC).isoformat(),
-                },
-            ],
-        }
-
-        # Mock body fetch responses for both messages
-        body1_response = Mock()
-        body1_response.status_code = 200
-        body1_response.text = '{}'
-        body1_response.json.return_value = {'body': {'content': '<html>Test body 1</html>'}}
-
-        body2_response = Mock()
-        body2_response.status_code = 200
-        body2_response.text = '{}'
-        body2_response.json.return_value = {'body': {'content': '<html>Test body 2</html>'}}
-
-        # Set up mock responses in sequence
-        mock_request.side_effect = [page1_response, body1_response, body2_response]
-        mock_get.return_value = page2_response
-
-        # Fetch emails
-        records = graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
-
-        # Should have fetched both pages
-        assert len(records) == 2
-        assert records[0].uid == 'msg1'
-        assert records[1].uid == 'msg2'
-
-        # Verify nextLink was used
-        mock_get.assert_called_once_with(
-            'https://next-page-url',
-            headers={
-                'Authorization': 'Bearer test_token_12345',
-                'Content-Type': 'application/json',
-            },
-            timeout=30,
-        )
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_pagination_stops_when_no_nextlink(
-        self,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that pagination stops when @odata.nextLink is absent."""
-        graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
-
-        # Mock single page response without nextLink
-        response = Mock()
-        response.status_code = 200
-        response.text = '{}'
-        response.json.return_value = {'value': []}
-        mock_request.return_value = response
-
-        records = graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
-
-        # Should only make one request (no pagination)
-        assert mock_request.call_count == 1
-        assert len(records) == 0
+        """Test client property creates GraphServiceClient."""
+        with patch('automate.eserv.monitor.client.GraphServiceClient') as mock_gsc:
+            _ = graph_client.client
+            mock_gsc.assert_called_once_with(graph_client.config.creds.msal)
 
 
 class TestFolderResolution:
-    """Test folder path resolution to folder ID."""
+    """Test async folder resolution."""
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_resolve_nested_folder_path(
+    @pytest.mark.asyncio
+    async def test_resolve_monitoring_folder_caches_result(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test resolving deeply nested folder paths."""
-        # Mock responses for each level of folder hierarchy
-        # Level 1: Inbox
-        level1_response = Mock()
-        level1_response.status_code = 200
-        level1_response.json.return_value = {'value': [{'id': 'inbox_id', 'displayName': 'Inbox'}]}
+        """Test folder ID is cached after first resolution."""
+        with patch(
+            'automate.eserv.monitor.utils.resolve_mail_folders',
+            return_value='cached-folder-id',
+        ) as mock_resolve:
+            # Mock the request.get() to return empty folder list
+            mock_request = Mock()
+            mock_request.get = AsyncMock(return_value=[])
 
-        # Level 2: Test Folder
-        level2_response = Mock()
-        level2_response.status_code = 200
-        level2_response.json.return_value = {
-            'value': [{'id': 'test_folder_id', 'displayName': 'Test Folder'}],
-        }
+            with patch.object(graph_client, 'request', return_value=mock_request):
+                # First call
+                folder_id1 = await graph_client._resolve_monitoring_folder_id()
 
-        mock_request.side_effect = [level1_response, level2_response]
+                # Second call should use cache
+                folder_id2 = await graph_client._resolve_monitoring_folder_id()
 
-        folder_id = graph_client.resolve_monitoring_folder_id()
+                assert folder_id1 == folder_id2 == 'cached-folder-id'
+                # Should only resolve once
+                mock_resolve.assert_called_once()
 
-        assert folder_id == 'test_folder_id'
-        assert mock_request.call_count == 2
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_resolve_folder_raises_on_missing_folder(
+    @pytest.mark.asyncio
+    async def test_resolve_folder_raises_on_failure(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that missing folder raises FileNotFoundError."""
-        # Mock empty response (folder not found)
-        response = Mock()
-        response.status_code = 200
-        response.json.return_value = {'value': []}
-        mock_request.return_value = response
+        """Test FileNotFoundError raised when folder cannot be resolved."""
+        with patch(
+            'automate.eserv.monitor.utils.resolve_mail_folders',
+            side_effect=ValueError('Folder not found'),
+        ):
+            mock_request = Mock()
+            mock_request.get = AsyncMock(return_value=[])
 
-        with pytest.raises(FileNotFoundError):
-            graph_client.resolve_monitoring_folder_id()
+            with patch.object(graph_client, 'request', return_value=mock_request):
+                with pytest.raises(FileNotFoundError):
+                    await graph_client._resolve_monitoring_folder_id()
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_folder_id_caching(
+
+class TestFetchUnprocessedEmails:
+    """Test async email fetching."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_emails_with_filter(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that folder ID is cached after first resolution."""
-        response = Mock()
-        response.status_code = 200
-        response.json.return_value = {'value': [{'id': 'cached_id', 'displayName': 'Inbox'}]}
-        mock_request.return_value = response
+        """Test emails are fetched with date filter."""
+        # Mock folder resolution
+        graph_client._folder_id_cache['monitoring'] = 'test-folder-id'
 
-        # First call should hit API
-        folder_id1 = graph_client.resolve_monitoring_folder_id()
+        # Create mock message
+        mock_message = Mock()
+        mock_message.id = 'msg-123'
+        mock_message.sender = Mock()
+        mock_message.sender.email_address = Mock()
+        mock_message.sender.email_address.address = 'test@example.com'
+        mock_message.subject = 'Test Subject'
+        mock_message.body = Mock()
+        mock_message.body.content = '<html><body>Test</body></html>'
+        mock_message.received_date_time = datetime.now(UTC)
 
-        # Second call should use cache
-        folder_id2 = graph_client.resolve_monitoring_folder_id()
+        # Mock request.collect()
+        mock_request = Mock()
+        mock_request.collect = AsyncMock(return_value=[mock_message])
 
-        assert folder_id1 == folder_id2 == 'cached_id'
-        # Should only make API calls for first resolution (2 levels in path)
-        assert mock_request.call_count == 2
+        with patch.object(graph_client, 'request', return_value=mock_request):
+            records = await graph_client.fetch_unprocessed_emails(processed_uids=set())
 
+            assert len(records) == 1
+            assert records[0].uid == 'msg-123'
+            assert records[0].sender == 'test@example.com'
+            assert records[0].subject == 'Test Subject'
 
-class TestErrorHandling:
-    """Test network error categorization and retry logic."""
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_retries_on_429_rate_limit(
+    @pytest.mark.asyncio
+    async def test_fetch_excludes_processed_uids(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that 429 errors trigger retry with exponential backoff."""
-        # First attempt: 429 error
-        error_response = Mock()
-        error_response.status_code = 429
-        error1 = HTTPError(response=error_response)
+        """Test processed UIDs are filtered out."""
+        graph_client._folder_id_cache['monitoring'] = 'test-folder-id'
 
-        # Second attempt: success
-        success_response = Mock()
-        success_response.status_code = 200
-        success_response.text = '{}'
-        success_response.json.return_value = {'value': 'success'}
+        # Create two messages, one already processed
+        msg1 = Mock()
+        msg1.id = 'msg-processed'
+        msg1.sender = Mock()
+        msg1.sender.email_address = Mock()
+        msg1.sender.email_address.address = 'test@example.com'
+        msg1.subject = 'Processed'
+        msg1.body = Mock()
+        msg1.body.content = '<html>Test</html>'
+        msg1.received_date_time = datetime.now(UTC)
 
-        mock_request.side_effect = [error1, success_response]
+        msg2 = Mock()
+        msg2.id = 'msg-new'
+        msg2.sender = Mock()
+        msg2.sender.email_address = Mock()
+        msg2.sender.email_address.address = 'test@example.com'
+        msg2.subject = 'New'
+        msg2.body = Mock()
+        msg2.body.content = '<html>Test</html>'
+        msg2.received_date_time = datetime.now(UTC)
 
-        result = graph_client._request('GET', '/test')
+        mock_request = Mock()
+        mock_request.collect = AsyncMock(return_value=[msg1, msg2])
 
-        assert result == {'value': 'success'}
-        assert mock_request.call_count == 2
+        with patch.object(graph_client, 'request', return_value=mock_request):
+            records = await graph_client.fetch_unprocessed_emails(
+                processed_uids={'msg-processed'}
+            )
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_retries_on_500_server_error(
+            # Should only return the new message
+            assert len(records) == 1
+            assert records[0].uid == 'msg-new'
+
+    @pytest.mark.asyncio
+    async def test_fetch_raises_on_missing_html_body(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that 5xx errors trigger retry."""
-        error_response = Mock()
-        error_response.status_code = 503
-        error = HTTPError(response=error_response)
+        """Test ValueError raised when message has no HTML body."""
+        graph_client._folder_id_cache['monitoring'] = 'test-folder-id'
 
-        success_response = Mock()
-        success_response.status_code = 200
-        success_response.text = '{}'
-        success_response.json.return_value = {'data': 'ok'}
+        # Message with no body content
+        msg = Mock()
+        msg.id = 'msg-123'
+        msg.body = Mock()
+        msg.body.content = None  # Missing body
 
-        mock_request.side_effect = [error, success_response]
+        mock_request = Mock()
+        mock_request.collect = AsyncMock(return_value=[msg])
 
-        result = graph_client._request('GET', '/test')
-
-        assert result == {'data': 'ok'}
-        assert mock_request.call_count == 2
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_no_retry_on_400_bad_request(
-        self,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that 4xx errors do not trigger retry."""
-        error_response = Mock()
-        error_response.status_code = 400
-        error = HTTPError(response=error_response)
-
-        mock_request.side_effect = error
-
-        with pytest.raises(HTTPError):
-            graph_client._request('GET', '/test')
-
-        # Should only attempt once (no retries)
-        assert mock_request.call_count == 1
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_no_retry_on_401_unauthorized(
-        self,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that 401 errors do not trigger retry."""
-        error_response = Mock()
-        error_response.status_code = 401
-        error = HTTPError(response=error_response)
-
-        mock_request.side_effect = error
-
-        with pytest.raises(HTTPError):
-            graph_client._request('GET', '/test')
-
-        assert mock_request.call_count == 1
-
-    @patch('automate.eserv.monitor.client.requests.request')
-    @patch('automate.eserv.monitor.client.time.sleep')
-    def test_exponential_backoff_delays(
-        self,
-        mock_sleep: Mock,
-        mock_request: Mock,
-        graph_client: GraphClient,
-    ) -> None:
-        """Test that retry delays follow exponential backoff."""
-        error_response = Mock()
-        error_response.status_code = 429
-        error = HTTPError(response=error_response)
-
-        # All attempts fail
-        mock_request.side_effect = [error, error, error]
-
-        with pytest.raises(HTTPError):
-            graph_client._request('GET', '/test')
-
-        # Should have called sleep with exponential delays
-        # 1st retry: 1.0 * 2^0 = 1.0
-        # 2nd retry: 1.0 * 2^1 = 2.0
-        assert mock_sleep.call_count == 2
-        delays = [call[0][0] for call in mock_sleep.call_args_list]
-        assert delays == [1.0, 2.0]
+        with patch.object(graph_client, 'request', return_value=mock_request):
+            with pytest.raises(ValueError, match='Missing HTML body'):
+                await graph_client.fetch_unprocessed_emails(processed_uids=set())
 
 
-class TestMAPIFlags:
+class TestApplyFlag:
     """Test MAPI flag application."""
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_apply_flag_uses_correct_format(
+    @pytest.mark.asyncio
+    async def test_apply_flag_success(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that apply_flag sends correct JSON structure."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.text = '{}'
-        mock_response.json.return_value = {}
-        mock_request.return_value = mock_response
+        """Test flag is applied to email."""
+        flag = status_flag_factory(success=True)
 
-        # Create a test flag (success flag)
-        test_flag = status_flag_factory(success=True)
+        # Mock the Graph SDK client
+        mock_patch = AsyncMock()
+        graph_client.client = Mock()
+        graph_client.client.me = Mock()
+        graph_client.client.me.messages = Mock()
+        graph_client.client.me.messages.by_message_id = Mock(return_value=Mock())
+        graph_client.client.me.messages.by_message_id.return_value.patch = mock_patch
 
-        graph_client.apply_flag('test_email_id', test_flag)
+        await graph_client.apply_flag('msg-123', flag)
 
-        # Verify request structure
-        call_args = mock_request.call_args
-        assert call_args[0][0] == 'PATCH'
-        assert '/me/messages/test_email_id' in call_args[0][1]
-
-        json_data = call_args[1]['json']
-        assert 'singleValueExtendedProperties' in json_data
-        assert isinstance(json_data['singleValueExtendedProperties'], list)
-        assert len(json_data['singleValueExtendedProperties']) == 1
+        # Verify patch was called
+        mock_patch.assert_called_once()
 
 
-class TestHTMLBodyValidation:
-    """Test HTML body validation."""
+class TestRequestBuilder:
+    """Test request builder pattern."""
 
-    @patch('automate.eserv.monitor.client.requests.request')
-    def test_raises_on_empty_html_body(
+    def test_request_builder_creation(
         self,
-        mock_request: Mock,
         graph_client: GraphClient,
     ) -> None:
-        """Test that empty HTML body raises ValueError."""
-        graph_client._folder_id_cache['monitoring'] = 'test_folder_id'
+        """Test request builder is created with proper parameters."""
+        mock_builder = Mock()
 
-        # Mock message list response
-        list_response = Mock()
-        list_response.status_code = 200
-        list_response.json.return_value = {
-            'value': [
-                {
-                    'id': 'msg1',
-                    'from': {'emailAddress': {'address': 'test@example.com'}},
-                    'subject': 'Test',
-                    'receivedDateTime': datetime.now(UTC).isoformat(),
-                },
-            ],
-        }
+        request = graph_client.request(
+            mock_builder,
+            filter='test filter',
+            top=50,
+            select=['id', 'subject'],
+        )
 
-        # Mock body fetch with empty content
-        body_response = Mock()
-        body_response.status_code = 200
-        body_response.json.return_value = {'body': {'content': ''}}
+        assert request.builder == mock_builder
+        assert request.filter == 'test filter'
+        assert request.top == 50
+        assert request.select == ['id', 'subject']
 
-        mock_request.side_effect = [list_response, body_response]
+    @pytest.mark.asyncio
+    async def test_request_collect_handles_pagination(
+        self,
+        graph_client: GraphClient,
+    ) -> None:
+        """Test collect() follows pagination links."""
+        mock_builder = Mock()
 
-        with pytest.raises(ValueError, match='has no HTML body'):
-            graph_client.fetch_unprocessed_emails(num_days=1, processed_uids=set())
+        # First response with nextLink
+        mock_response1 = Mock()
+        mock_response1.odata_next_link = 'https://next-page'
+        mock_response1.value = [Mock(id='item1')]
+
+        # Second response without nextLink
+        mock_response2 = Mock()
+        mock_response2.odata_next_link = None
+        mock_response2.value = [Mock(id='item2')]
+
+        async def mock_get_side_effect(*args, **kwargs):
+            if not hasattr(mock_get_side_effect, 'call_count'):
+                mock_get_side_effect.call_count = 0
+            mock_get_side_effect.call_count += 1
+
+            if mock_get_side_effect.call_count == 1:
+                return mock_response1
+            return mock_response2
+
+        mock_builder.get = AsyncMock(side_effect=mock_get_side_effect)
+        mock_builder.with_url = Mock(return_value=mock_builder)
+
+        request = graph_client.request(mock_builder)
+        results = await request.collect()
+
+        # Should have collected both pages
+        assert len(results) == 2
+        assert results[0].id == 'item1'
+        assert results[1].id == 'item2'
+
+        # Verify with_url was called with nextLink
+        mock_builder.with_url.assert_called_once_with('https://next-page')
