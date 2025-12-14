@@ -11,6 +11,7 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
+import typing
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -19,6 +20,60 @@ import pytest
 from automate.eserv.monitor.client import GraphClient, make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
+
+if typing.TYPE_CHECKING:
+    from pathlib import Path
+
+
+@pytest.fixture
+def mock_config(directory: Path) -> Config:
+    """Create test config with environment file."""
+    from datetime import UTC, datetime, timedelta
+
+    import orjson
+
+    from automate.eserv import configure
+    from automate.eserv.config.utils import get_example_env_dict
+
+    # Create credentials file with future expiration
+    future_time = (datetime.now(UTC) + timedelta(hours=4)).isoformat()
+    creds_file = directory / 'credentials.json'
+    creds_data = [
+        {
+            'type': 'dropbox',
+            'account': 'test@example.com',
+            'client_id': 'test-dropbox-client-id',
+            'client_secret': 'test-dropbox-client-secret',
+            'access_token': 'test-dropbox-access-token',
+            'token_type': 'bearer',
+            'expires_at': future_time,
+            'refresh_token': 'test-dropbox-refresh-token',
+            'scope': 'account_info.read files.content.read files.content.write files.metadata.read',
+        },
+        {
+            'type': 'msal',
+            'account': 'test@example.com',
+            'client_id': 'test-msal-client-id',
+            'client_secret': 'test-msal-client-secret',
+            'token_type': 'Bearer',
+            'scope': 'Mail.ReadWrite openid profile email',
+            'expires_at': future_time,
+            'access_token': 'test-msal-access-token',
+            'refresh_token': 'test-msal-refresh-token',
+        },
+    ]
+    creds_file.write_bytes(orjson.dumps(creds_data))
+
+    env_dict = get_example_env_dict()
+    env_dict['CREDENTIALS_FILE'] = str(creds_file)
+    env_file = directory.joinpath('.env.example').resolve()
+    env_file.touch(exist_ok=True)
+    env_file.write_text('\n'.join(f'{k}={v}' for k, v in env_dict.items()))
+
+    config = configure(env_file)
+    # Override folder path for testing
+    object.__setattr__(config, 'monitor_mail_folder_path', ['Inbox', 'Test'])
+    return config
 
 
 @pytest.fixture
