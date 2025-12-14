@@ -63,16 +63,17 @@ async def resolve_mail_folders(
     segments: list[str],
     folders: list[MailFolder],
 ) -> str:
+
     s0 = segments.pop(0)
     target_name = ContextVar[str]('target_name', default=s0)
 
-    async def get_child_folders(fid: str):
-        request = service.me.mail_folders.by_mail_folder_id(fid).child_folders
-        qs = request.ChildFoldersRequestBuilderGetQueryParameters(
-            filter=f"startswith(displayName, '{target_name.get()}')"
-        )
-        rc = request.ChildFoldersRequestBuilderGetRequestConfiguration(query_parameters=qs)
-        return await request.get(rc)
+    async def get_child_folders(fid: str) -> list[MailFolder]:
+        from .client import GraphClient
+
+        return await GraphClient.request(
+            service.me.mail_folders.by_mail_folder_id(fid).child_folders,
+            filter=f"startswith(displayName, '{target_name.get()}')",
+        ).get()
 
     mapping: dict[str, str] = dict.fromkeys(segments, '')
 
@@ -99,12 +100,8 @@ async def resolve_mail_folders(
                     break
                 if f.child_folders:
                     return await recurse_folder_id_resolution(f.child_folders)
-                if (
-                    f.child_folder_count
-                    and (response := await get_child_folders(curr_id))
-                    and response.value
-                ):
-                    return await recurse_folder_id_resolution(response.value)
+                if child_folders := f.child_folder_count and await get_child_folders(curr_id):
+                    return await recurse_folder_id_resolution(child_folders)
 
         if not all(mapping.values()):
             raise ValueError(target_name.get())

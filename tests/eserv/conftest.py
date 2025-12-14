@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
 
     from automate.eserv.types import EmailRecord
 
-from dataclasses import fields, replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
@@ -43,7 +43,7 @@ PROJECT_ROOT=./
 SMTP_SERVER=smtp.example.com
 SMTP_FROM_ADDR=test@example.com
 SMTP_TO_ADDR=test@example.com
-MONITORING_FOLDER_PATH=Inbox,File Handling - All,Filing Accepted / Notification of Service / Courtesy Copy
+MONITORING_FOLDER_PATH=Inbox,Test
 CERT_PRIVATE_KEY_PATH=
 """
 
@@ -168,25 +168,15 @@ def mock_config(
     from automate.eserv.config.main import BaseFields, MonitoringFields, SMTPFields
 
     # Initialize field instances which will call default_factory for all fields
-    base_fields = BaseFields()
-    monitoring_fields = MonitoringFields()
-    smtp_fields = SMTPFields()
-
-    configuration = {'paths': mock_paths, 'creds': mock_creds}
-
-    # Manually extract fields from each dataclass to avoid asdict() issues
-    for f in fields(BaseFields):
-        if hasattr(base_fields, f.name):
-            configuration[f.name] = getattr(base_fields, f.name)
-    for f in fields(MonitoringFields):
-        if hasattr(monitoring_fields, f.name):
-            configuration[f.name] = getattr(monitoring_fields, f.name)
-    for f in fields(SMTPFields):
-        if hasattr(smtp_fields, f.name):
-            configuration[f.name] = getattr(smtp_fields, f.name)
-
     mock_config = Mock(spec=Config)
-    mock_config.configure_mock(**configuration)
+
+    mock_config.configure_mock(
+        paths=mock_paths,
+        creds=mock_creds,
+        **asdict(BaseFields()),
+        **asdict(MonitoringFields()),
+        **asdict(SMTPFields()),
+    )
 
     return mock_config
 

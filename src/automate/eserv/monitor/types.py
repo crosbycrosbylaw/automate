@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal, NewType, Protocol
+from dataclasses import dataclass
+from typing import Any, Literal, NewType, Protocol, runtime_checkable
 
 __all__ = [
     'EmailProcessor',
-    'GetQueryParameter',
     'GraphClient',
     'MailFolder',
     'MailFoldersRequestBuilder',
     'Message',
     'MessagesRequestBuilder',
+    'QueryParameters',
     'RequestConfiguration',
     'SingleValueLegacyExtendedProperty',
     'StatusFlag',
@@ -18,9 +19,7 @@ __all__ = [
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.mail_folder import MailFolder
 from msgraph.generated.models.message import Message
-from msgraph.generated.models.single_value_legacy_extended_property import (
-    SingleValueLegacyExtendedProperty,
-)
+from msgraph.generated.models.single_value_legacy_extended_property import SingleValueLegacyExtendedProperty
 from msgraph.generated.users.item.mail_folders.item.messages.messages_request_builder import (
     MessagesRequestBuilder,
 )
@@ -33,9 +32,9 @@ from .client import GraphClient
 from .processor import EmailProcessor
 
 
-class GetQueryParameter(Protocol):
-    __dataclass_fields__: ClassVar[dict[str, Any]]
-
+@dataclass
+@runtime_checkable
+class QueryParameters(Protocol):
     def get_query_parameter(self, original_name: str) -> str: ...
 
 

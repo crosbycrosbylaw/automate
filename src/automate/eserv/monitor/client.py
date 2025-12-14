@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from automate.eserv.types import Config, EmailRecord, StatusFlag
 
     from .client import GraphClient
-    from .types import BuilderProto, GetQueryParameter
+    from .types import BuilderProto, QueryParameters
 
 
 class GraphClient:
@@ -38,10 +38,8 @@ class GraphClient:
 
         odata_next_link: str | None = field(init=False)
 
-        def _qs(self) -> GetQueryParameter:
-            cls = getattr(
-                self.builder, next(a for a in dir(self.builder) if a.endswith('GetQueryParameters'))
-            )
+        def _qs(self) -> QueryParameters:
+            cls = getattr(self.builder, next(a for a in dir(self.builder) if a.endswith('QueryParameters')))
             return cls(**{f.name: getattr(self, f.name) for f in fields(self) if f.doc is not None})
 
         async def get(self) -> list[T]:

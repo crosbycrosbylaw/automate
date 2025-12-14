@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from .utils import EmailAddress
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class MonitoringFields:
     monitor_num_days: int = field(default_factory=int_env_var('MONITORING_LOOKBACK_DAYS', 1))
     monitor_mail_folder_path: list[str] = field(
@@ -34,7 +34,7 @@ class MonitoringFields:
     )
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class SMTPFields:
     smtp_server: str = field(default_factory=env_var('SMTP_SERVER'))
     smtp_port: int = field(default_factory=int_env_var('SMTP_PORT', 587))
@@ -51,7 +51,7 @@ class SMTPFields:
     )
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class BaseFields:
     index_max_age: int = field(default_factory=int_env_var('INDEX_CACHE_TTL_HOURS', 4))
     manual_review_folder: str = field(default_factory=env_var('MANUAL_REVIEW_FOLDER', '/MANUAL_REVIEW/'))
@@ -85,7 +85,7 @@ class Config(
 
         # Initialize all fields with default_factory (since __init__ is bypassed)
         for f in fields(cls):
-            if f.init and f.default_factory is not dataclasses.MISSING:  # type: ignore
+            if f.init and f.default_factory is not dataclasses.MISSING:
                 object.__setattr__(config, f.name, f.default_factory())
 
         # Initialize credentials last (requires paths.credentials)
