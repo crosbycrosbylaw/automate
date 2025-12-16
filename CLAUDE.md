@@ -209,6 +209,42 @@ pixi run push
 
 ## Development History
 
+### Test Suite Updates and Bug Fixes (December 16, 2025)
+
+**Major updates:** Fixed failing tests in test_processor.py and test_oauth_credential.py after API refactoring.
+
+**Changes:**
+
+-   **Fixed test_processor.py** - All 11 tests now passing
+    -   Removed obsolete `mock_graph` and `mock_collect` fixtures using old pattern
+    -   Refactored TestProcessBatch to patch `GraphServiceClient` and `collect_unprocessed_emails` at correct locations
+    -   Updated test_flag_application_failure_continues_processing with same pattern
+    -   Key fix: patch at definition site (`automate.eserv.monitor.collect.collect_unprocessed_emails`) not import site
+
+-   **Fixed majority of test_oauth_credential.py** - 29/43 tests passing (was 16/43)
+    -   Fixed `microsoft_credential` fixture to set `authority` property for MSALManager
+    -   Fixed `factory` parameter name (was `manager_factory`)
+    -   Fixed `expiration()` return type expectations (returns datetime, export converts to ISO string)
+    -   Fixed `get_token()` method tests (not `.token` property)
+    -   Fixed scope filtering test to use correct credential instance
+    -   Added `reset_credentials_singleton` fixture to fix CredentialsConfig singleton conflicts
+    -   Fixed certificate auth tests for MSALManager API changes
+    -   Fixed MSAL token normalization test (expires_in → expires_at conversion)
+    -   Fixed AuthError exception type expectations
+
+-   **Fixed OAuthCredential.reconstruct() bug** - Critical fix in oauth_credential.py
+    -   `expires_in` and `issued_at` now stored in `properties` dict (not as invalid fields)
+    -   Prevents TypeError when using dataclasses.replace()
+    -   Properly supports OAuth2 responses with relative expiration times
+
+**Test results:** 117/135 tests passing (87%)
+- 18 failures remaining (all in test_oauth_credential.py MSAL integration and certificate auth tests)
+- All other test files passing: test_core, test_processor, test_client, test_download, test_upload, test_config, test_email_state, test_error_tracking, test_index_cache, test_target_finder, all extractor tests
+
+**Outstanding issues:** MSAL integration tests need additional mocking updates for multi-tier authentication fallback patterns.
+
+---
+
 ### Authentication Management Bug Fixes (December 8, 2025)
 
 **Fixed 7 issues** in authentication management system after recent refactoring.
@@ -416,30 +452,45 @@ pixi run push
 
 ## Current Test Status
 
-**Test Results (as of December 2025):**
+**Test Results (as of December 16, 2025):**
 
--   ✅ **131 tests passing**
--   ⏭️ **0 tests skipped**
--   ❌ **0 failures**
--   ❌ **0 errors**
+-   ✅ **117 tests passing** (87%)
+-   ⏭️ **1 test skipped**
+-   ❌ **18 failures** (all in test_oauth_credential.py)
 
 **Test Coverage by Module:**
 
--   ✅ `extract/` - Full coverage (6 test files, 26 tests)
--   ✅ `monitor/` - Full coverage (test_client.py + test_processor.py, 20 tests)
--   ✅ `util/` - Partial coverage (5 test files, 62 tests)
--   ✅ `stages/upload.py` - Full coverage (TestDropboxManager + orchestration tests)
--   ✅ `stages/download.py` - Full coverage (14 tests)
--   ✅ `test_core.py` - Full coverage (17 tests, all passing)
--   ✅ `test_integration.py` - Basic workflows covered (4 tests)
+-   ✅ `extract/` - Full coverage (6 test files, 26 tests) - ALL PASSING
+-   ✅ `monitor/` - Full coverage (test_client.py + test_processor.py, 20 tests) - ALL PASSING
+-   ⚠️ `util/test_oauth_credential.py` - Partial (29/43 tests passing) - MSAL integration tests need work
+-   ✅ `util/` (other) - Full coverage (test_config, test_email_state, test_error_tracking, test_index_cache, test_target_finder) - ALL PASSING
+-   ✅ `stages/` - Full coverage (test_upload.py + test_download.py, 27 tests) - ALL PASSING
+-   ✅ `test_core.py` - Full coverage (17 tests) - ALL PASSING
+-   ✅ `test_integration.py` - Basic workflows covered (4 tests) - ALL PASSING
+
+**Remaining work:**
+- Fix 14 MSAL integration tests (silent refresh, account cache, token normalization, dual mode, app recreation)
+- Fix 3 certificate authentication tests (fallback patterns, refresh chain)
+- Fix 1 protocol compliance test (MSALManager TokenManager implementation)
 
 ---
 
 ## System Status
 
-**Production Readiness:** ✅ **ALL TESTS PASSING**
+**Production Readiness:** ⚠️ **NEARING COMPLETION - 87% Tests Passing**
 
-All 131 tests passing with comprehensive coverage across all modules. Core functionality stable and ready for production validation.
+Core functionality stable with 117/135 tests passing. All critical paths tested (email monitoring, document processing, OAuth refresh, upload/download). Remaining failures are in advanced MSAL authentication scenarios (certificate fallback, silent refresh after migration).
+
+**Pre-deployment requirements:**
+1. ✅ Core pipeline functionality (process, monitor, execute)
+2. ✅ Email monitoring and batch processing
+3. ✅ Document download and upload orchestration
+4. ✅ Basic OAuth credential management and refresh
+5. ⚠️ Advanced MSAL integration patterns (14 tests)
+6. ⚠️ Certificate-based authentication fallback (3 tests)
+7. ✅ Error tracking and notification system
+8. ✅ Fuzzy matching and target finding
+9. ✅ Index caching with TTL
 
 ---
 

@@ -156,8 +156,13 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         if expires_at := token_data.get('expires_at'):
             changes['expires_at'] = expires_at
         elif expires_in := token_data.get('expires_in'):
-            changes['expires_in'] = expires_in
-            changes['issued_at'] = token_data.get('issued_at', datetime.now(UTC).isoformat())
+            # Store expires_in and issued_at in properties (not fields)
+            new_props = self.properties.copy()
+            new_props['expires_in'] = expires_in
+            new_props['issued_at'] = token_data.get('issued_at', datetime.now(UTC).isoformat())
+            changes['properties'] = new_props
+            # Set expires_at to None so expiration() will calculate it from properties
+            changes['expires_at'] = None
 
         return replace(self, **changes)
 
