@@ -323,6 +323,7 @@ class MockDependencies:
             # Cache both the factory and the instance
             mock_factory = MagicMock(spec=ErrorTracker, return_value=mock_error_tracker)
             object.__setattr__(self, '_get_error_tracker', mock_factory)
+
         return self._get_error_tracker
 
     def as_mock(self, string: str) -> Mock:

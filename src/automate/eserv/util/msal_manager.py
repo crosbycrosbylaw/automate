@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -118,8 +119,9 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
         return _parse_auth_response(response)
 
     def _acquire_token_for_client(self) -> dict[str, Any] | None:
-        response = self.client.acquire_token_for_client(scopes=self.scopes)
-        return _parse_auth_response(response)
+        with contextlib.suppress(DeprecationWarning):
+            response = self.client.acquire_token_for_client(scopes=['.default'])
+            return _parse_auth_response(response)
 
     def _refresh_token(self) -> dict[str, Any]:
         """Refresh Microsoft Outlook token using MSAL.

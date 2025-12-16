@@ -147,7 +147,14 @@ def msal_refresh_test_case(
 
     mock_cred.configure_mock(manager=PropertyMock(return_value=Mock(client=mock_client)))
 
-    expected_data = parse_credential_json({**response_data, 'type': 'msal'}).export()
+    # Build expected data with required credential fields
+    expected_data = parse_credential_json({
+        **response_data,
+        'type': 'msal',
+        'client_id': cred.client_id,
+        'client_secret': cred.client_secret,
+        'account': cred.account,
+    }).export()
 
     if config.get('refresh') is False:
         mock_acquire_token.assert_not_called()
@@ -893,7 +900,10 @@ class TestMSALIntegration:
 
         with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
             mock_app = Mock()
+            mock_app.get_accounts.return_value = []  # No cached accounts
+            mock_app.acquire_token_silent.return_value = None  # Silent refresh fails
             mock_app.acquire_token_by_refresh_token.return_value = mock_msal_result
+            mock_app.acquire_token_for_client.return_value = None  # Certificate not used
             MockMSAL.return_value = mock_app
 
             result = _refresh_outlook_msal(cred)
@@ -902,7 +912,8 @@ class TestMSALIntegration:
             assert result['access_token'] == 'new_token'
             assert result['refresh_token'] == 'new_refresh'
             assert result['token_type'] == 'Bearer'
-            assert result['scope'] == 'Mail.Read offline_access Mail.Send'  # String, not list
+            # _parse_auth_response keeps scope as list (reconstruct() converts to string)
+            assert result['scope'] == ['Mail.Read', 'offline_access', 'Mail.Send']
             # _parse_auth_response converts expires_in to expires_at
             assert 'expires_at' in result
             assert isinstance(result['expires_at'], datetime)
@@ -1079,8 +1090,8 @@ class TestMSALIntegration:
         ):
             manager = CredentialsConfig(creds_file)
 
-            # Refresh Dropbox credential
-            dbx_cred = manager['dropbox']
+            # Refresh Dropbox credential (use property to trigger refresh)
+            dbx_cred = manager.dropbox
 
             # Assert Dropbox uses SDK refresh (not MSAL)
             mock_dbx.check_and_refresh_access_token.assert_called_once()
@@ -1089,7 +1100,8 @@ class TestMSALIntegration:
             # Refresh Outlook credential
             outlook_cred = manager.msal
 
-            # Assert Outlook uses MSAL
+            # Assert Outlook uses MSAL (silent fails, then refresh_token)
+            mock_msal_app.acquire_token_silent.assert_called_once()
             mock_msal_app.acquire_token_by_refresh_token.assert_called_once()
             assert outlook_cred.manager.client is not None
             assert outlook_cred.access_token == 'new_outlook_token'
@@ -1141,11 +1153,10 @@ class TestCertificateAuthentication:
         manager = microsoft_credential.manager
 
         with (
-            patch.object(manager.client, 'acquire_token_by_refresh_token') as mock_rt,
-            patch.object(manager.client, 'acquire_token_for_client') as mock_cert,
             patch.object(manager, '_acquire_token_silent', return_value=None),
+            patch.object(manager, '_acquire_token_by_refresh_token', return_value=None),
+            patch.object(manager, '_acquire_token_for_client') as mock_cert,
         ):
-            mock_rt.return_value = None
             mock_cert.return_value = {'access_token': 'cert_token', 'expires_in': 3600}
 
             refreshed_cred = microsoft_credential.refresh()

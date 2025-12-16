@@ -24,10 +24,15 @@ class EnvStatus(Enum):
 
     @classmethod
     def from_path(cls, dotenv_path: StrPath | None) -> tuple[Path, EnvStatus]:
-        if isinstance(dotenv_path, PathLike):
+        if isinstance(dotenv_path, Path):
+            path = dotenv_path.absolute()
+        elif isinstance(dotenv_path, PathLike):
             path = Path(dotenv_path)
         else:
             path = Path(find_dotenv(dotenv_path or '.env'))
+
+        if not path.is_file():
+            raise FileNotFoundError(path)
 
         if os.getenv('PYTHON_DOTENV_DISABLED') == path.name:
             return path, EnvStatus.LOAD_SUCCESS
@@ -44,6 +49,8 @@ class EnvStatus(Enum):
 def _into_root(string: str):
     try:
         path = Path(string).resolve(strict=True)
+        if not path.is_dir():
+            return hint('path must be a directory')
     except FileNotFoundError:
         return hint('failed to resolve root directory')
     else:
