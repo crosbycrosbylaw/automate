@@ -12,16 +12,17 @@ Tests cover:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
+
+import pytest
 
 from automate.eserv import *
 from automate.eserv.types import *
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from tests.eserv.conftest import SetupFilesFixture
     from tests.eserv.stages.conftest import UploadDocumentSubtestFixture
 
 
@@ -194,6 +195,7 @@ class TestDropboxManagerUpload:
         assert len(manager.uploaded) == 1
         assert manager.uploaded[0] == '/Clio/Smith v. Jones/Motion.pdf'
 
+    @patch('dropbox.Dropbox')
     def test_uploaded_list_tracking(
         self,
         mock_credential: Mock,
@@ -201,12 +203,6 @@ class TestDropboxManagerUpload:
     ) -> None:
         """Test uploaded files are tracked in list."""
         manager = DropboxManager(credential=mock_credential)
-
-        mock_client = Mock()
-        mock_client.files_upload.return_value = Mock()
-
-        # Set _client directly since client is a read-only property
-        manager._client = mock_client
 
         # Upload multiple files
         manager.upload(mock_document, '/Clio/Case1/Doc1.pdf')
@@ -220,10 +216,24 @@ class TestDropboxManagerUpload:
         assert '/Clio/Case2/Doc3.pdf' in manager.uploaded
 
 
+type SetupFiles = Callable[[Mapping[str, bytes]], Sequence[Path]]
+
+
+@pytest.fixture
+def setup_files(directory: Path) -> SetupFiles:
+    store = directory / 'doc-store'
+    store.mkdir(parents=True, exist_ok=True)
+
+    def factory(mapping: Mapping[str, bytes]) -> Sequence[Path]:
+        return [p for n, b in mapping.items() if (Path.write_bytes(p := store.joinpath(n), b))]
+
+    return factory
+
+
 def test_document_upload_orchestration(
     mock_document: Path,
-    setup_files: SetupFilesFixture,
     run_upload_subtest: UploadDocumentSubtestFixture,
+    setup_files: SetupFiles,
 ) -> None:
     """Test various behaviors related to document uploading."""
     run_upload_subtest(
@@ -271,16 +281,18 @@ def test_document_upload_orchestration(
 
     run_upload_subtest(
         'multi-file naming conventions are consistent',
-        documents=setup_files({
-            'doc1.pdf': b'%PDF-1.4\nDoc1',
-            'doc2.pdf': b'%PDF-1.4\nDoc2',
-            'doc3.pdf': b'%PDF-1.4\nDoc3',
-        }),
+        documents=(
+            docs := setup_files({
+                'doc1.pdf': b'%PDF-1.4\nDoc1',
+                'doc2.pdf': b'%PDF-1.4\nDoc2',
+                'doc3.pdf': b'%PDF-1.4\nDoc3',
+            })
+        ),
         cached_paths=['/Clio/Smith v. Jones'],
         case_name='Smith v. Jones',
         uploaded=[],
         extensions=lambda self: {
-            'upload should be called per file': self.mock_dbx.upload.call_count == 3,
+            'upload should be called per file': self.mock_dbx.upload.call_count == len(docs),
         },
     )
 

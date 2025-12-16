@@ -158,6 +158,7 @@ pixi run push
         -   Lazy MSAL app initialization from credential via `client` property
 
 **Utility Subpackage (`util/`):**
+
 -   **`email_state.py`** - `EmailState`: UID-based audit log for processed emails
     -   Fresh start (no weekly rotation, UID primary key)
     -   Overloaded `record()` for flexible input types
@@ -320,9 +321,9 @@ pixi run push
 
 **Fix:** Fixed failing test in `test_core.py::TestPipelineMonitor::test_error_log_cleanup_before_processing`.
 
-**Issue:** Test was asserting against `mock_dependencies['tracker']` but the Pipeline was using a real ErrorTracker instance because the `error_tracker` patch was missing.
+**Issue:** Test was asserting against `mock_deps['tracker']` but the Pipeline was using a real ErrorTracker instance because the `error_tracker` patch was missing.
 
-**Resolution:** Added missing `patch('automate.eserv.core.error_tracker', return_value=mock_dependencies['tracker'])` to match the pattern used in all other tests in the file. This ensures the Pipeline receives the mock tracker so assertions work correctly.
+**Resolution:** Added missing `patch('automate.eserv.core.error_tracker', return_value=mock_deps['tracker'])` to match the pattern used in all other tests in the file. This ensures the Pipeline receives the mock tracker so assertions work correctly.
 
 **Result:** All 131 tests now passing with 0 failures and 0 skipped tests.
 

@@ -36,7 +36,7 @@ class EmailProcessor:
 
     async def process_batch(self) -> BatchResult:
         """Process all unprocessed emails from monitoring folder."""
-        from automate.eserv.monitor import collect_unprocessed_emails
+        from automate.eserv.monitor.collect import collect_unprocessed_emails
         from automate.eserv.types import BatchResult
 
         results: list[ProcessedResult] = []

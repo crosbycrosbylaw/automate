@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import NoneType
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import orjson
 import pytest
@@ -28,9 +28,8 @@ def _refresh_outlook_msal(cred: OAuthCredential[MSALManager]) -> dict[str, Any]:
 
 @pytest.fixture
 def dropbox_credential():
-    return OAuthCredential(
-        factory=DropboxManager,
-        type='dropbox',
+    # @claude : update to use mock_deps
+    return new_dropbox_credential(
         account='test-business',
         client_id='test_client_id',
         client_secret='test_client_secret',
@@ -57,6 +56,7 @@ def mock_dropbox():
 
 @pytest.fixture
 def microsoft_credential():
+    # @claude : update to use mock_deps
     return new_msal_credential(
         account='test-account',
         client_id='outlook_client_id',
@@ -85,6 +85,7 @@ class TokenManagerClientConfig(TypedDict, total=False):
 type _MSALRefreshMethodDescriptor = Literal['silent', 'refresh_token', 'certificate']
 
 
+# @claude : update to use mock_deps
 def msal_refresh_test_case(
     cred: OAuthCredential[Any],
     accounts: Sequence[Any] = (),
@@ -100,6 +101,8 @@ def msal_refresh_test_case(
     | None = None,
     **config: Unpack[TokenManagerClientConfig],
 ) -> Mock:
+
+    mock_cred = Mock(wraps=cred)
 
     error_data = config.get('error_result')
 
@@ -140,47 +143,47 @@ def msal_refresh_test_case(
         **dict.fromkeys(remaining, Mock(return_value=None)),
     )
 
-    expected_data = parse_credential_json({**response_data, 'type': 'msal'})[1].export()
+    mock_cred.configure_mock(manager=PropertyMock(return_value=Mock(client=mock_client)))
 
-    with patch(
-        target='automate.eserv.util.msal_manager.ConfidentialClientApplication',
-        new=Mock(return_value=mock_client),
-    ):
-        if config.get('refresh') is False:
-            mock_acquire_token.assert_not_called()
+    expected_data = parse_credential_json({**response_data, 'type': 'msal'}).export()
 
-        elif error_data is not None:
-            with pytest.raises(match=error_data.get('error_description', 'Token refresh was unsuccessful')):
-                result = cred.refresh()
+    if config.get('refresh') is False:
+        mock_acquire_token.assert_not_called()
 
-        else:
-            started_at = time.time()
+    elif error_data is not None:
+        with pytest.raises(match=error_data.get('error_description', 'Token refresh was unsuccessful')):
             result = cred.refresh()
 
-            mock_acquire_token.assert_called_once()
+    else:
+        started_at = time.time()
+        result = cred.refresh()
 
-            if 'error_result' not in config:
-                for x in str(result), result.access_token:
-                    assert x == expected_data['access_token']
+        mock_acquire_token.assert_called_once()
 
-                assert result.refresh_token == expected_data['refresh_token']
-                assert result.scope == expected_data['scope']
+        if 'error_result' not in config:
+            for x in str(result), result.access_token:
+                assert x == expected_data['access_token']
 
-                assert result.expires_at is not None
+            assert result.refresh_token == expected_data['refresh_token']
+            assert result.scope == expected_data['scope']
 
-                if 'expires_in' in expected_data:
-                    seconds = expected_data['expires_in'] - int(started_at - time.time())
-                    expected_data['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
+            assert result.expires_at is not None
 
-                    ms = expected_data['expires_at'].microsecond
-                    result.expires_at = result._resolve_expiration().replace(microsecond=ms)
+            if exp_in := expected_data.get('expires_in'):
+                assert isinstance(exp_in, int)
+                seconds = exp_in - int(started_at - time.time())
+                exp_at = datetime.now(UTC) + timedelta(seconds=seconds)
 
-                if 'expires_at' in expected_data:
-                    assert result.expires_at == expected_data['expires_at']
+                result.expires_at = result._resolve_expiration().replace(microsecond=exp_at.microsecond)
+                expected_data['expires_at'] = exp_at.isoformat()
+
+            if 'expires_at' in expected_data:
+                assert result.expires_at == expected_data['expires_at']
 
     return mock_client
 
 
+# @claude : update to use mock_deps
 def dbx_refresh_test_case(
     cred: OAuthCredential[Any],
     **config: Unpack[TokenManagerClientConfig],
@@ -223,6 +226,7 @@ def dbx_refresh_test_case(
     return mock_client
 
 
+# @claude : update to use mock_deps
 class TestTokenRefresh:
     """Test unified refresh mechanism for both Dropbox and Outlook."""
 
@@ -306,6 +310,7 @@ class TestTokenRefresh:
             replace(dropbox_credential, manager_factory=Mock(return_value=None))
 
 
+# @claude : update to use mock_deps
 class TestCredentialUpdate:
     """Test credential update logic."""
 
@@ -428,6 +433,7 @@ class TestCredentialUpdate:
         assert updated2.access_token == 'token3'
 
 
+# @claude : update to use mock_deps
 class TestDropboxManager:
     """Test DropboxManager client creation and lifecycle."""
 
@@ -508,6 +514,7 @@ class TestDropboxManager:
             assert call_kwargs['app_secret'] == cred.client_secret
 
 
+# @claude : update to use mock_deps
 class TestCredentialSerialization:
     """Test credential serialization (export/load)."""
 
@@ -550,6 +557,7 @@ class TestCredentialSerialization:
         assert exported['expires_at'] is None
 
 
+# @claude : update to use mock_deps
 class TestCredentialsConfig:
     """Test credential manager loading and expiry checking."""
 
@@ -684,6 +692,7 @@ class TestCredentialsConfig:
         assert 'data' not in saved_data[0]
 
 
+# @claude : update to use mock_deps
 class TestMSALIntegration:
     """Test MSAL integration for Microsoft Outlook authentication."""
 
@@ -981,7 +990,7 @@ class TestMSALIntegration:
                 'automate.eserv.util.msal_manager.ConfidentialClientApplication',
                 return_value=mock_app,
             ):
-                manager['msal'] = parse_credential_json(cred1_dict)[1]
+                manager['msal'] = parse_credential_json(cred1_dict)
 
             # Second refresh (normal mode)
             cred2 = manager.msal
@@ -1061,6 +1070,7 @@ class TestMSALIntegration:
             assert outlook_cred.access_token == 'new_outlook_token'
 
 
+# @claude : update to use mock_deps
 class TestCertificateAuthentication:
     """Test certificate-based authentication fallback."""
 
@@ -1075,7 +1085,7 @@ class TestCertificateAuthentication:
                 'token_type': 'Bearer',
             }
 
-            token_data = manager._authenticate_with_certificate()
+            token_data = manager._acquire_token_for_client()
 
             assert isinstance(token_data, dict)
             assert token_data['access_token'] == 'cert_token'
@@ -1119,6 +1129,7 @@ class TestCertificateAuthentication:
             mock_cert_auth.assert_called_once()
 
 
+# @claude : update to use mock_deps
 class TestProtocolCompliance:
     """Test that managers implement TokenManager protocol."""
 
@@ -1162,7 +1173,7 @@ class TestTokenProperty:
         """Token property should return AccessToken for Azure SDK."""
         from azure.core.credentials import AccessToken
 
-        token = microsoft_credential()
+        token = microsoft_credential.access_token
 
         assert isinstance(token, AccessToken)
         assert token.token == str(microsoft_credential)
@@ -1179,13 +1190,14 @@ class TestTokenProperty:
         assert token.expires_on == int(dropbox_credential.expires_at.timestamp())
 
 
+# @claude : update to use mock_deps
 class TestEdgeCases:
     """Test edge cases and error paths."""
 
     def test_validate_token_data_with_non_dict(self, microsoft_credential: MSALCredential):
         """_validate_token_data should raise TypeError for non-dict."""
         with pytest.raises(TypeError, match='Expected dict, got str'):
-            _validate_token_data('not a dict', errors=True)
+            _validate_token_data('not a dict')
 
     def test_validate_token_data_with_error_response(self, microsoft_credential: MSALCredential):
         """_validate_token_data should raise dynamic exception for errors."""

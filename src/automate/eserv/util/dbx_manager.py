@@ -59,9 +59,8 @@ class DropboxManager(TokenManager[Dropbox]):
         with path.open('rb') as f:
             self.client.files_upload(f.read(), dropbox_path, mode=WriteMode.overwrite)
 
-        console.info('Uploaded file to Dropbox', path=path.as_posix(), dropbox_path=dropbox_path)
-
         self.uploaded.append(dropbox_path)
+        console.info('Uploaded file to Dropbox', path=path, dropbox_path=dropbox_path)
 
     def _refresh_token(self) -> dict[str, Any]:
         self.client.check_and_refresh_access_token()

@@ -10,10 +10,10 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Sized
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from rampy import test
@@ -22,7 +22,6 @@ from automate.eserv import (
     get_record_processor,
     make_email_record,
     process_pipeline_result,
-    status_flag_factory,
 )
 
 if TYPE_CHECKING:
@@ -30,31 +29,27 @@ if TYPE_CHECKING:
     from typing import Any
 
     from automate.eserv.types import *
+    from tests.eserv.conftest import MockDependencies
 
 
 @pytest.fixture
-def mock_pipeline(mock_config: Mocked[Config]) -> Mock:
+def mock_pipeline(mock_deps: MockDependencies) -> Mock:
     """Create mock Pipeline with config and state."""
+    deps = mock_deps
     pipeline = Mock(spec=['config', 'state', 'execute'])
 
     # Mock config with credentials and monitoring
-    pipeline.config = Mock()
-    pipeline.config.credentials = {
-        'msal': Mock(access_token='test_outlook_token'),
-    }
-    pipeline.config.monitoring = Mock()
+    pipeline.config = deps.configure.return_value
+    pipeline.config.creds = Mock()
+    pipeline.config.creds.msal = Mock(access_token='test_outlook_token')
+    pipeline.config.monitor_num_days = 1
+    pipeline.config.monitor_mail_folder_path = ['Inbox', 'Test']
 
     # Mock state tracker
     pipeline.state = Mock(spec=['processed', 'record'])
     pipeline.state.processed = set()
 
     return pipeline
-
-
-@pytest.fixture
-def mock_collect() -> Mock:
-    """Create mock GraphClient."""
-    return Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
 
 
 @pytest.fixture
@@ -70,8 +65,8 @@ def sample_email_record() -> EmailRecord:
 
 
 @test.paramdef('evaluator').values(
-    (lambda p, mock: p.state is mock.state,),
-    (lambda p, mock: p.client is not None,),
+    (lambda p, mock: p.pipe.state is mock.state,),
+    (lambda p, mock: hasattr(p, 'graph'),),
 )
 class TestEmailProcessorInit:
     """Test EmailProcessor initialization."""
@@ -81,7 +76,7 @@ class TestEmailProcessorInit:
         evaluator: Callable[[EmailProcessor, Mock], bool],
         mock_pipeline: Mock,
     ) -> None:
-        """Test GraphClient created from pipeline config credentials."""
+        """Test GraphServiceClient created from pipeline config credentials."""
         processor = get_record_processor(pipe=mock_pipeline)
 
         assert evaluator(processor, mock_pipeline)
@@ -202,17 +197,6 @@ class TestProcessBatch:
             else:
                 email_records.append(rec)
 
-        mock_client = Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
-
-        async def mock_fetch_unprocessed(*_: ...):
-            await asyncio.sleep(1)
-            return email_records
-
-        mock_client.fetch_unprocessed_emails = mock_fetch_unprocessed
-
-        processor = get_record_processor(pipe=mock_pipeline)
-        processor.client = mock_client
-
         # Configure execute to return ProcessedResult objects
         if mock_execute is not None:
             # Wrap the mock_execute to handle both dict and EmailRecord
@@ -247,7 +231,20 @@ class TestProcessBatch:
         expect_total = expect_total or len(records)
         expect_called = expect_called or expect_total
 
-        batch_result = await processor.process_batch()
+        # Create mock graph client
+        mock_graph = Mock()
+        mock_graph.me.messages.by_message_id.return_value.patch = AsyncMock()
+
+        # Create mock collect function
+        mock_collect = AsyncMock(return_value=email_records)
+
+        # Patch both GraphServiceClient and collect_unprocessed_emails
+        with (
+            patch('automate.eserv.monitor.processor.GraphServiceClient', return_value=mock_graph),
+            patch('automate.eserv.monitor.collect.collect_unprocessed_emails', mock_collect),
+        ):
+            processor = get_record_processor(pipe=mock_pipeline)
+            batch_result = await processor.process_batch()
 
         assert batch_result.total == expect_total
         assert batch_result.succeeded == expect_succeeded
@@ -256,7 +253,8 @@ class TestProcessBatch:
         assert mock_pipeline.execute.call_count == expect_called
 
         if verify_flags_applied:
-            assert mock_client.apply_flag.call_count == expect_called
+            # Flags are applied via graph.me.messages.patch
+            assert mock_graph.me.messages.by_message_id.return_value.patch.call_count == expect_called
 
         if verify_state_recorded:
             assert mock_pipeline.state.record.call_count == expect_called
@@ -268,16 +266,6 @@ async def test_flag_application_failure_continues_processing(
     sample_email_record: EmailRecord,
 ) -> None:
     """Test that flag application failures don't crash processing."""
-    processor = get_record_processor(pipe=mock_pipeline)
-    mock_client = Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
-
-    async def mock_fetch_unprocessed(*_: ...):
-        await asyncio.sleep(1)
-        return [sample_email_record]
-
-    # Mock fetch returns 1 email
-    mock_client.fetch_unprocessed_emails = mock_fetch_unprocessed
-
     # Mock execute returns success
     mock_pipeline.execute.return_value = process_pipeline_result(
         record=make_email_record(
@@ -288,12 +276,21 @@ async def test_flag_application_failure_continues_processing(
         error=None,
     )
 
-    # Mock flag application raises exception
-    mock_client.apply_flag.side_effect = Exception('Flag API error')
-    processor.client = mock_client
+    # Mock graph with failing patch operation
+    mock_graph = Mock()
+    mock_graph.me.messages.by_message_id.return_value.patch = AsyncMock(
+        side_effect=Exception('Flag API error')
+    )
 
-    # Execute batch processing - should NOT raise
-    result = await processor.process_batch(num_days=1)
+    mock_collect = AsyncMock(return_value=[sample_email_record])
+
+    # Patch both GraphServiceClient and collect_unprocessed_emails
+    with (
+        patch('automate.eserv.monitor.processor.GraphServiceClient', return_value=mock_graph),
+        patch('automate.eserv.monitor.collect.collect_unprocessed_emails', mock_collect),
+    ):
+        processor = get_record_processor(pipe=mock_pipeline)
+        result = await processor.process_batch()
 
     # Verify processing completed despite flag failure
     assert result.total == 1
@@ -308,19 +305,14 @@ async def test_flag_application_failure_continues_processing(
     ({'category': 'download', 'message': 'Network timeout'},),  # pyright: ignore[reportArgumentType]
 )
 class TestResultFlagConversion:
-    """Test result to flag conversion logic."""
+    """Test result to patch body conversion logic."""
 
     def test_dynamic(
         self,
         error: ErrorDict | None,
         mock_pipeline: Mock,
     ) -> None:
-        """Test successful result converts to success flag."""
-        if error is not None:
-            expect_flag = status_flag_factory(error)
-        else:
-            expect_flag = status_flag_factory()
-
+        """Test successful result converts to correct MAPI extended property."""
         result = process_pipeline_result(
             record=make_email_record(
                 uid='email-123',
@@ -331,7 +323,16 @@ class TestResultFlagConversion:
         )
 
         processor = get_record_processor(pipe=mock_pipeline)
-        assert processor._result_to_flag(result) == expect_flag
+        patch_body = processor._result_to_patch_body(result)
+
+        # Verify patch body has single_value_extended_properties
+        assert hasattr(patch_body, 'single_value_extended_properties')
+        assert isinstance(patch_body.single_value_extended_properties, Sized)
+        assert len(patch_body.single_value_extended_properties) == 1
+
+        # Verify extended property was created (internals handled by msgraph SDK)
+        prop = patch_body.single_value_extended_properties[0]
+        assert prop is not None
 
 
 def batch_result_scenario(

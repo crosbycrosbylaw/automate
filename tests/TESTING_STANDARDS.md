@@ -364,7 +364,7 @@ if TYPE_CHECKING:
 
 # Standard pytest fixtures for mock objects
 @pytest.fixture
-def mock_dependencies(directory) -> dict[str, Mock]:
+def mock_deps(directory) -> dict[str, Mock]:
     """Mock all component dependencies."""
     # Create mock objects with default behavior
     mock_config = Mock()
@@ -386,7 +386,7 @@ type MockFactory = Callable[[*tuple[ComponentDependency, ...]], _GeneratorContex
 # Optional factory fixture to reduce repetition
 @pytest.fixture
 def mock_factory(
-    mock_dependencies: dict[str, Mock],
+    mock_deps: dict[str, Mock],
 ) -> MockFactory:
     """Factory for patching component dependencies.
 
@@ -406,7 +406,7 @@ def mock_factory(
     def _mock_factory(*deps: ComponentDependency) -> Generator[dict[ComponentDependency, Mock]]:
         """Patch specified dependencies and yield mock dict."""
         out: dict[ComponentDependency, Mock] = {
-            name: Mock(return_value=mock_dependencies[name])
+            name: Mock(return_value=mock_deps[name])
             for name in deps if name in lookup
         }
         try:
@@ -425,7 +425,7 @@ def mock_factory(
 class TestComponentBehavior:
     def test_method_calls_dependencies(
         self,
-        mock_dependencies: dict,
+        mock_deps: dict,
         mock_factory: MockFactory,
     ) -> None:
         """Test component calls all dependencies."""
@@ -438,7 +438,7 @@ class TestComponentBehavior:
             mocks['config'].assert_called_once()
 
             # Access original mock for assertions
-            assert component.state is mock_dependencies['state']
+            assert component.state is mock_deps['state']
 ```
 
 **Key conventions:**
@@ -448,7 +448,7 @@ class TestComponentBehavior:
 -   Factory fixture uses `@contextmanager` for clean setup/teardown
 -   Lookup dict maps friendly names to actual import paths
 -   Factory yields dict of mocks for assertions
--   Tests can still access `mock_dependencies` for detailed assertions
+-   Tests can still access `mock_deps` for detailed assertions
 -   Factory is optional - tests can still use verbose patches if needed
 -   **Module-specific** - Each test file defines its own factory; avoid generalized "factory factories"
 

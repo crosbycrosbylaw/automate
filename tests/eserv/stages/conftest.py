@@ -103,10 +103,9 @@ class UploadDocumentSubtestFixture(test.subtestfix):
     def context(self) -> Generator[Any]:
         try:
             with (
-                patch('automate.eserv.upload.get_dbx_index_cache', return_value=self.mock_cache),
-                patch('automate.eserv.upload.get_dbx_folder_matcher', return_value=self.mock_matcher),
-                patch('automate.eserv.util.dbx_manager.DropboxManager', return_value=self.mock_dbx),
-                patch('automate.eserv.upload.get_notifier', return_value=self.mock_notifier),
+                patch('automate.eserv.upload.get_dbx_index_cache', Mock(return_value=self.mock_cache)),
+                patch('automate.eserv.upload.get_dbx_folder_matcher', Mock(return_value=self.mock_matcher)),
+                patch('automate.eserv.upload.get_notifier', Mock(return_value=self.mock_notifier)),
             ):
                 yield
         finally:
@@ -138,8 +137,12 @@ class UploadDocumentSubtestFixture(test.subtestfix):
         })
 
         self.mock_dbx.configure_mock(**{
-            'uploaded': kwds.pop('uploaded', ()),
+            'uploaded': kwds.pop('uploaded', []),
             'index.return_value': index_returns,
+        })
+
+        self.mock_config.configure_mock(**{
+            'creds.dropbox.manager': self.mock_dbx,
         })
         return super().bind_factory(
             documents=kwds['documents'],
