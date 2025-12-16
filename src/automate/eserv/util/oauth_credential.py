@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from functools import cached_property
-from operator import methodcaller
 from typing import TYPE_CHECKING, Any, Self, overload
 
 from azure.core.credentials import AccessToken
@@ -36,12 +35,7 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
     factory: Callable[[Self], T] = field(repr=False, metadata={'internal': True})
     account: str | None = field(default=None)
     properties: dict[str, Any] = field(default_factory=dict, metadata={'internal': True})
-    expires_at: str | datetime | None = field(
-        default=None,
-        metadata={
-            'dynamic': methodcaller('expiration'),
-        },
-    )
+    expires_at: str | datetime | None = field(default=None)
 
     @cached_property
     def manager(self) -> T:
@@ -52,14 +46,18 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         return datetime.now(UTC) > (self.expiration() - timedelta(minutes=5))
 
     def expiration(self) -> datetime:
-        if not isinstance(self.expires_at, datetime):
-            self.expires_at = self._resolve_expiration()
+        if not isinstance(self.expires_at, str):
+            dt = self._resolve_expiration()
+            self.expires_at = dt.isoformat()
+        else:
+            dt = datetime.fromisoformat(self.expires_at)
 
-        return self.expires_at
+        return dt
 
     def _resolve_expiration(self) -> datetime:
         if isinstance(self.expires_at, datetime):
             return self.expires_at
+
         if self.expires_at is not None:
             return datetime.fromisoformat(self.expires_at)
 
@@ -120,12 +118,12 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         data: dict[str, Any] = {}
 
         for f in fields(self):
-            if not f.metadata:
-                data[f.name] = getattr(self, f.name)
-            elif 'internal' in f.metadata:
+            if 'internal' in f.metadata:
                 continue
-            elif isinstance(caller := f.metadata.get('dynamic'), methodcaller):
-                data[f.name] = caller(self)
+            if isinstance(x := getattr(self, f.name), datetime):
+                data[f.name] = x.isoformat()
+            else:
+                data[f.name] = x
 
         return {**data, **self.properties}
 
