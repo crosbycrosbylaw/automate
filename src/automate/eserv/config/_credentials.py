@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-__all__ = ['CredentialsConfig']
-
 import threading
-from dataclasses import dataclass, field, fields
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, overload
+from dataclasses import InitVar, dataclass, field, fields
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast, no_type_check, overload
 
 import orjson
 
 from automate.eserv.util.oauth_credential import OAuthCredential
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
     from threading import Lock
 
@@ -20,14 +18,14 @@ if TYPE_CHECKING:
 
 def parse_credential_json(
     data: CredentialsJSON | dict[str, Any],
-) -> tuple[CredentialType, OAuthCredential[Any]]:
+) -> OAuthCredential[Any]:
     """Parse fields from token data."""
     keywords: dict[str, Any] = {}
 
     keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
     keywords['properties'] = {key: val for key, val in data.items() if key not in keywords}
 
-    match key := data['type']:
+    match data['type']:
         case 'dropbox':
             from automate.eserv import new_dropbox_credential
 
@@ -41,83 +39,78 @@ def parse_credential_json(
         case _:
             cred = OAuthCredential(**keywords)
 
-    return key, cred
+    return cred
+
+
+@no_type_check
+def _credential_map_factory() -> CredentialMap:
+    return {}
 
 
 @dataclass(slots=True, frozen=True)
 class CredentialsConfig:
     """Manages OAuth credentials for Dropbox and Outlook."""
 
-    _instance: ClassVar[Self | None] = None
+    _path: ClassVar[Path]
+    _instance: ClassVar[Self]
 
-    path: Path = field(metadata={'updated_at': None})
+    path: InitVar[Path]
 
-    _mapping: dict[CredentialType, OAuthCredential[Any]] = field(init=False, default_factory=dict)
+    @property
+    def msal(self) -> MSALCredential:
+        """Retrieve an MSAL credential, refreshing and caching the value as needed."""
+        with self._lock:
+            cred: MSALCredential = self._mapping['msal']
+            return cred if not cred.outdated else self._refresh(cred)
+
+    @property
+    def dropbox(self) -> DropboxCredential:
+        """Retrieve a Dropbox credential, refreshing and caching the value as needed."""
+        with self._lock:
+            cred: DropboxCredential = self._mapping['dropbox']
+            return cred if not cred.outdated else self._refresh(cred)
+
     _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
+    _mapping: CredentialMap = field(init=False, repr=False, default_factory=_credential_map_factory)
 
     def __new__(cls, path: Path) -> Self:
-        if not cls._instance:
-            cls._instance = super().__new__(cls)
+        if not hasattr(cls, '_instance'):
+            cls._path = path.resolve(strict=True)
+            this = super().__new__(cls)
+            this.__init__(path)
+            object.__setattr__(this, '_lock', threading.Lock())
+            object.__setattr__(this, '_mapping', {})
+
+            cls._instance = this
         return cls._instance
 
-    def __post_init__(self) -> None:
-        """Initialize the credential manager."""
-        with self.path.open('rb') as f:
+    def __post_init__(self, path: Path) -> None:
+        if self._path != path:
+            message = f'Received conflicting credential file paths:\n\n{path!s}!={self._path!s}'
+            raise RuntimeError(message)
+
+        with self._path.open('rb') as f:
             data = orjson.loads(f.read())
 
         for json in data:
-            self._mapping.update([parse_credential_json(json)])
+            cred = parse_credential_json(json)
+            self._mapping[cred.type] = cred
 
     def __setitem__(self, name: CredentialType, value: OAuthCredential[Any]) -> None:
         """Update or add a cached OAuth2 credential."""
         with self._lock:
             self._mapping[name] = value
 
-    if TYPE_CHECKING:
-
-        @overload
-        def __getitem__(
-            self,
-            name: Literal['msal'],
-        ) -> OAuthCredential[MSALManager]: ...
-        @overload
-        def __getitem__(
-            self,
-            name: Literal['dropbox'],
-        ) -> OAuthCredential[DropboxManager]: ...
-
-    def __getitem__(self, name: CredentialType) -> OAuthCredential[Any]:
+    @overload
+    def __getitem__(self, name: Literal['msal']) -> MSALCredential: ...
+    @overload
+    def __getitem__(self, name: Literal['dropbox']) -> DropboxCredential: ...
+    def __getitem__(self, name: ...) -> ...:
         """Retrieve the named OAuth2 credential directly from the cache."""
         with self._lock:
             return self._mapping[name]
 
-    if TYPE_CHECKING:
-
-        @overload
-        def __getattr__(
-            self,
-            name: Literal['msal'],
-        ) -> OAuthCredential[MSALManager]: ...
-        @overload
-        def __getattr__(
-            self,
-            name: Literal['dropbox'],
-        ) -> OAuthCredential[DropboxManager]: ...
-
-    def __getattr__(self, name: CredentialType) -> OAuthCredential[Any]:
-        """Retrieve the named authorization credential, storing the value if not found in cache.
-
-        This method automatically refreshes expired credentials.
-        """
-        # Handle special attributes that should not trigger credential lookup
-        if name.startswith('_'):
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-        with self._lock:
-            cred = self._mapping[name]
-            return cred if not cred.outdated else self._refresh(cred)
-
-    def _refresh(self, cred: OAuthCredential[Any]) -> OAuthCredential:
+    def _refresh[T: OAuthCredential[Any]](self, cred: T) -> T:
         """Refresh an OAuth2 token.
 
         Raises:
@@ -126,27 +119,23 @@ class CredentialsConfig:
 
         """
         refreshed = cred.refresh()
-
         with self._lock:
             self._mapping[cred.type] = refreshed
             self.persist()
-
         return refreshed
 
-    def persist(self, mapping: dict[CredentialType, OAuthCredential[Any]] | None = None) -> None:
+    @no_type_check
+    def persist(self, **mapping: OAuthCredential[Any]) -> None:
         """Write updated credentials back to disk."""
         with self._lock:
             self._mapping.update(mapping or {})
 
-        data = [cred.export() for cred in self._mapping.values()]
-
-        with self.path.open('wb') as f:
+        data = [cred.export() for cred in cast('Iterable[OAuthCredential]', self._mapping.values())]
+        with self._path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-
-        self.__dataclass_fields__['path'].metadata['updated_at'] = datetime.now(UTC)
 
 
 def get_credentials() -> CredentialsConfig:
     from ._paths import get_paths
 
-    return CredentialsConfig(get_paths().credentials)
+    return CredentialsConfig(path=get_paths().credentials)

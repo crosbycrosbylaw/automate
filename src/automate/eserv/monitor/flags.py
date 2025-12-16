@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, no_type_check, overload
+from typing import TYPE_CHECKING, Literal, NewType, no_type_check, overload
 
 if TYPE_CHECKING:
-    from automate.eserv.types import ErrorDict, StatusFlag
+    from automate.eserv.types import ErrorDict
+
+StatusFlag = NewType('StatusFlag', dict[Literal['id', 'value'], str])
 
 
 @overload

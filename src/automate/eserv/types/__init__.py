@@ -6,6 +6,8 @@ __all__ = [
     'CaseMatch',
     'Config',
     'CredentialsConfig',
+    'DataclassInstance',
+    'DataclassType',
     'DocumentDownloadError',
     'DocumentExtractionError',
     'DocumentUploadError',
@@ -21,7 +23,7 @@ __all__ = [
     'ErrorTracker',
     'FolderMatcher',
     'FolderResolutionError',
-    'GraphClient',
+    'GraphRequest',
     'IndexCache',
     'IntermediaryResult',
     'InvalidFormatError',
@@ -36,6 +38,7 @@ __all__ = [
     'PipelineStage',
     'ProcessedResult',
     'StatusFlag',
+    'StrPath',
     'TokenManager',
     'UploadInfo',
     'UploadStatus',
@@ -56,6 +59,7 @@ from .structs import *
 if TYPE_CHECKING:
     __all__ += [
         'BaseConfig',
+        'CredentialMap',
         'CredentialType',
         'CredentialsJSON',
         'DropboxCredential',

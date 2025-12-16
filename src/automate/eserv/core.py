@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextvars
 from datetime import UTC, datetime
-from os import PathLike
 from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
@@ -14,6 +13,8 @@ from automate.eserv.types import *
 from setup_console import console
 
 if TYPE_CHECKING:
+    from os import PathLike
+
     from automate.eserv.types import BatchResult, EmailRecord, ProcessedResult
 
 tracker = contextvars.ContextVar[ErrorTracker]('tracker')
@@ -125,7 +126,7 @@ class Pipeline:
         """Initialize pipeline with configuration."""
         self.config = configure(dotenv_path=dotenv_path)
         self.state = get_state_tracker(self.config.paths.state)
-        self.tracker = get_error_tracker(self.config.paths.error_log)
+        self.tracker = get_error_tracker(self.config.paths.errors)
 
     def process(self, record: EmailRecord) -> IntermediaryResult:
         """Process HTML file through complete pipeline.
@@ -175,7 +176,7 @@ class Pipeline:
 
             return _upload(self.config, context)
 
-    async def monitor(self, num_days: int = 1) -> BatchResult:
+    async def monitor(self) -> BatchResult:
         """Monitor email inbox and process new messages.
 
         Args:
@@ -187,14 +188,11 @@ class Pipeline:
         """
         self.tracker.clear_old_errors(days=30)
 
-        batch_result = await get_record_processor(self).process_batch(num_days)
+        batch_result = await get_record_processor(self).process_batch()
+        batch_errors = [e for x in batch_result.summarize().get('error', []) if (e := x.get('error'))]
 
-        for err in batch_result.summarize().get('error', ()):
-            if inner := err.get('error'):
-                message = str(inner.pop('message'))
-                context = inner.pop('context', {})
-
-                console.error(message, **context)
+        for err in batch_errors:
+            console.error(str(err.pop('message')), **err.pop('context', {}))
 
         console.info(
             event='Batch complete',

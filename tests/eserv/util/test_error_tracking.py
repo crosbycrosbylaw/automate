@@ -80,7 +80,7 @@ class TestErrorTracker:
         test_retrieval: bool,
         directory: Path,
     ):
-        log_file = directory / 'error_log.json'
+        log_file = directory / 'errors.json'
 
         if test_persistence:
             # Test persistence across instances

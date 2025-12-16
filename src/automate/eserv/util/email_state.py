@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 class EmailState:
     """Audit log for processed emails (UID-based)."""
 
-    json_path: Path
+    path: Path
+
     _entries: dict[str, ProcessedResult] = field(default_factory=dict, init=False)
 
     @property
@@ -34,12 +35,12 @@ class EmailState:
 
     def _load(self) -> None:
         """Load from JSON, fresh start if missing."""
-        if not self.json_path.exists():
+        if not self.path.exists():
             self._entries = {}
             return
 
         try:
-            with self.json_path.open('rb') as f:
+            with self.path.open('rb') as f:
                 data: dict[str, ProcessedResultDict] = orjson.loads(f.read())
 
             self._entries = {uid: process_pipeline_result(entry) for uid, entry in data.items()}
@@ -78,9 +79,9 @@ class EmailState:
         """Persist to JSON."""
         data: dict[str, ProcessedResultDict] = {uid: entry.asdict() for uid, entry in self._entries.items()}
 
-        self.json_path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        with self.json_path.open('wb') as f:
+        with self.path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 

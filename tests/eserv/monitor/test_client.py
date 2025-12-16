@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from automate.eserv.monitor.client import GraphClient, make_graph_client
 from automate.eserv.monitor.flags import status_flag_factory
 from automate.eserv.types import *
 

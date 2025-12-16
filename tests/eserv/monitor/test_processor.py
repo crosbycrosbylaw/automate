@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def mock_pipeline() -> Mock:
+def mock_pipeline(mock_config: Mocked[Config]) -> Mock:
     """Create mock Pipeline with config and state."""
     pipeline = Mock(spec=['config', 'state', 'execute'])
 
@@ -52,7 +52,7 @@ def mock_pipeline() -> Mock:
 
 
 @pytest.fixture
-def mock_graph_client() -> Mock:
+def mock_collect() -> Mock:
     """Create mock GraphClient."""
     return Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
 
@@ -82,7 +82,7 @@ class TestEmailProcessorInit:
         mock_pipeline: Mock,
     ) -> None:
         """Test GraphClient created from pipeline config credentials."""
-        processor = get_record_processor(pipeline=mock_pipeline)
+        processor = get_record_processor(pipe=mock_pipeline)
 
         assert evaluator(processor, mock_pipeline)
 
@@ -210,7 +210,7 @@ class TestProcessBatch:
 
         mock_client.fetch_unprocessed_emails = mock_fetch_unprocessed
 
-        processor = get_record_processor(pipeline=mock_pipeline)
+        processor = get_record_processor(pipe=mock_pipeline)
         processor.client = mock_client
 
         # Configure execute to return ProcessedResult objects
@@ -247,7 +247,7 @@ class TestProcessBatch:
         expect_total = expect_total or len(records)
         expect_called = expect_called or expect_total
 
-        batch_result = await processor.process_batch(num_days=1)
+        batch_result = await processor.process_batch()
 
         assert batch_result.total == expect_total
         assert batch_result.succeeded == expect_succeeded
@@ -268,7 +268,7 @@ async def test_flag_application_failure_continues_processing(
     sample_email_record: EmailRecord,
 ) -> None:
     """Test that flag application failures don't crash processing."""
-    processor = get_record_processor(pipeline=mock_pipeline)
+    processor = get_record_processor(pipe=mock_pipeline)
     mock_client = Mock(spec=['fetch_unprocessed_emails', 'apply_flag'])
 
     async def mock_fetch_unprocessed(*_: ...):
@@ -330,7 +330,7 @@ class TestResultFlagConversion:
             error=error,
         )
 
-        processor = get_record_processor(pipeline=mock_pipeline)
+        processor = get_record_processor(pipe=mock_pipeline)
         assert processor._result_to_flag(result) == expect_flag
 
 

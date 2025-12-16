@@ -1,9 +1,21 @@
 from __future__ import annotations
 
-__all__ = ['email_env_var', 'env_var', 'get_example_env_dict', 'hint', 'int_env_var']
+from pathlib import Path
 
+__all__ = [
+    'email_variable',
+    'ensure_fields',
+    'env_var',
+    'get_example_env_dict',
+    'hint',
+    'integer_variable',
+    'path_variable',
+]
+
+import dataclasses
 import os
 import re
+from dataclasses import fields
 from typing import TYPE_CHECKING, Final, Literal, NewType, overload
 
 from rampy import make_factory
@@ -13,13 +25,18 @@ from automate.eserv.errors.types import InvalidFormatError, MissingVariableError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .types import DataclassInstance
+
 
 EmailAddress = NewType('EmailAddress', str)
 
 
 class ValidationHint:
     def __init__(self, string: str):
-        self.__str__ = lambda: string
+        self.string = string
+
+    def __str__(self):
+        return self.string
 
 
 hint = make_factory(ValidationHint)
@@ -71,7 +88,15 @@ def env_var[T = str](
     return _factory
 
 
-def int_env_var(key: str, default: int | None = None):
+def path_variable(
+    key: str,
+    default: str | None = None,
+    into: Callable[[str], Path | ValidationHint] = Path,
+):
+    return env_var(key, default, into=into)
+
+
+def integer_variable(key: str, default: int | None = None):
 
     def _into(s: str):
         try:
@@ -82,7 +107,7 @@ def int_env_var(key: str, default: int | None = None):
     return env_var(key, default=None if not isinstance(default, int) else str(default), into=_into)
 
 
-def email_env_var(key: str):
+def email_variable(key: str):
     from automate.eserv.config.types import EmailAddress
 
     pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -100,3 +125,13 @@ def get_example_env_dict() -> dict[str, str]:
     registry.setdefault('MONITORING_FOLDER_PATH', 'Inbox,Monitoring')
 
     return registry
+
+
+def ensure_fields[T: DataclassInstance](obj: T) -> T:
+    for f in fields(type(obj)):
+        if hasattr(obj, f.name) or not f.init:
+            continue
+        if f.default_factory is not dataclasses.MISSING:
+            object.__setattr__(obj, f.name, f.default_factory())
+
+    return obj

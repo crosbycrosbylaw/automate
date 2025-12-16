@@ -3,7 +3,7 @@
 This package provides error and exception classes for the eserv service.
 """
 
-__all__ = ['error_factory', 'raise_from_auth_response']
+__all__ = ['error_from_stage', 'raise_from_auth_response']
 
 from .authentication import raise_from_auth_response
-from .pipeline import error_factory
+from .pipeline import error_from_stage

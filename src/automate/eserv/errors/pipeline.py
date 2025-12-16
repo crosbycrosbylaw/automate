@@ -237,4 +237,4 @@ class FolderResolutionError(PipelineError):
     context: dict[str, object] = field(default_factory=dict, repr=False)
 
 
-error_factory = make_factory(PipelineError.from_stage)
+error_from_stage = make_factory(PipelineError.from_stage)

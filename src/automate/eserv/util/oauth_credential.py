@@ -110,7 +110,7 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
             },
         )
 
-    def export(self) -> dict[str, Any]:
+    def export(self) -> CredentialsJSON | dict[str, Any]:
         """Convert credential to JSON serializable dictionary (flat format).
 
         Returns:

@@ -1,163 +1,128 @@
 from __future__ import annotations
 
 import enum
-from sys import stdin
-
-from zmq import Enum
-
-__all__ = ['PathsConfig']
-
+import os
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property
+from os import PathLike
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Self
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
+from zmq import Enum
 
-from automate.eserv.config.utils import env_var, hint
+from automate.eserv.config.utils import env_var, hint, path_variable
 
 if TYPE_CHECKING:
-    from os import PathLike
-
-    from automate.eserv.types import *
+    from .types import *
 
 
 class EnvStatus(Enum):
-    SUCCESS = enum.auto()
-    ERROR = enum.auto()
+    NOT_LOADED = enum.auto()
+    LOAD_SUCCESS = enum.auto()
+    LOAD_ERROR = enum.auto()
 
     @classmethod
-    def from_path(cls, dotenv_path: PathLike[str] | None) -> EnvStatus:
-        if load_dotenv(dotenv_path, override=bool(dotenv_path)):
-            return cls.SUCCESS
-        return cls.ERROR
+    def from_path(cls, dotenv_path: StrPath | None) -> tuple[Path, EnvStatus]:
+        if isinstance(dotenv_path, PathLike):
+            path = Path(dotenv_path)
+        else:
+            path = Path(find_dotenv(dotenv_path or '.env'))
+
+        if os.getenv('PYTHON_DOTENV_DISABLED') == path.name:
+            return path, EnvStatus.LOAD_SUCCESS
+
+        if strict := load_dotenv(path, override=bool(path)):
+            status = EnvStatus.LOAD_SUCCESS
+            os.environ['PYTHON_DOTENV_DISABLED'] = path.name
+        else:
+            status = EnvStatus.LOAD_ERROR
+
+        return path.resolve(strict=strict), status
 
 
-def _validate_path(strpath: str | None, parent: Path) -> Path | None:
-    if strpath is None:
-        return None
-
+def _into_root(string: str):
     try:
-        path = parent.joinpath(strpath).resolve(strict=True)
+        path = Path(string).resolve(strict=True)
     except FileNotFoundError:
-        return None
+        return hint('failed to resolve root directory')
     else:
         return path
 
 
-@dataclass(frozen=True)
+@dataclass
 class PathsConfig:
     """File storage paths."""
 
-    _instance: ClassVar[Self | None] = None
-
-    _env_path: ClassVar[PathLike[str] | None] = None
-    _env_status: ClassVar[EnvStatus | None] = None
-
-    @classmethod
-    def check_env(cls) -> bool:
-        return cls._env_status == EnvStatus.SUCCESS
+    _instance: ClassVar[Self]
+    _status: ClassVar[EnvStatus] = EnvStatus.NOT_LOADED
+    _dotenv: ClassVar[Path | None] = None
 
     @classmethod
-    def env_path(cls) -> Path | None:
-        if cls._env_path:
-            return Path(cls._env_path).resolve(strict=True)
-        return None
+    def _init_env(cls, dotenv_path: StrPath | None = None) -> bool:
+        cls._dotenv, cls._status = EnvStatus.from_path(dotenv_path)
 
-    @classmethod
-    def default(cls) -> Self:
-        return cls(cls._env_path)
+        if success := cls._status == EnvStatus.LOAD_SUCCESS:
+            return success
 
-    dotenv_path: InitVar[PathLike[str] | None]
+        from setup_console import console
 
-    def __new__(cls, dotenv_path: PathLike[str] | None = None) -> PathsConfig:
-        if not cls._instance or cls._env_path != dotenv_path:
-            cls._env_path = dotenv_path
-            cls._env_status = EnvStatus.from_path(dotenv_path)
-            cls._instance = super().__new__(cls)
-        return cls._instance
+        console.warning(f'Failed to load environment from {cls._dotenv!s}')
+        return success
+
+    dotenv: InitVar[StrPath | None] = None
 
     root: Path = field(
         init=False,
-        default_factory=env_var(
-            key='PROJECT_ROOT',
-            into=lambda s: hint('expected an existing directory')
-            if not (path := Path(s).resolve()).exists()
-            else path.absolute(),
-        ),
+        default_factory=path_variable(key='PROJECT_ROOT', into=_into_root),
     )
-
-    _service: str = field(
+    credentials: Path = field(
         init=False,
-        default_factory=env_var(key='SERVICE_DIR', default='.service'),
+        default_factory=path_variable('CREDENTIALS_FILE', 'credentials.json'),
     )
-    _credentials: str = field(
+    private_key: Path | None = field(
         init=False,
-        default_factory=env_var(key='CREDENTIALS_FILE', default='credentials.json'),
-    )
-    _state: str = field(
-        init=False,
-        default_factory=env_var(key='STATE_FILE', default='state.json'),
-    )
-    _index: str = field(
-        init=False,
-        default_factory=env_var(key='INDEX_FILE', default='index.json'),
-    )
-    _private_key: str | None = field(
-        init=False,
-        default_factory=env_var(key='CERT_PRIVATE_KEY_PATH', optional=True),
+        default_factory=env_var('CERT_PRIVATE_KEY_FILE', optional=True, into=Path),
     )
 
     @cached_property
     def service(self) -> Path:
-        path = self.root.joinpath(self._service).resolve()
+        path = self.resolve(os.getenv('SERVICE_DIR', '.service'))
         if not path.exists():
             path.mkdir(parents=True)
         return path
 
-    @cached_property
-    def credentials(self) -> Path:
-        return self.root.joinpath(self._credentials).resolve(strict=True)
+    index: Path = field(init=False)
+    state: Path = field(init=False)
+    errors: Path = field(init=False)
 
-    @cached_property
-    def state(self) -> Path:
-        segment = self._state.removeprefix(self._service)
-        path = self.service.joinpath(segment).resolve()
-        if not path.exists():
-            path.touch()
-        return path.resolve(strict=True)
+    def __new__(cls, dotenv: StrPath | None = None) -> PathsConfig:
+        if not hasattr(cls, '_instance'):
+            cls._init_env(dotenv)
+            this = super().__new__(cls)
+            this.__init__(dotenv)
+            cls._instance = this
+        return cls._instance
 
-    @cached_property
-    def index(self) -> Path:
-        segment = self._index.removeprefix(self._service)
-        path = self.service.joinpath(segment).resolve()
-        if not path.exists():
-            path.touch()
-        return path.resolve(strict=True)
+    def __post_init__(self, dotenv: StrPath | None) -> None:
+        self._rebase()
+        self._scaffold()
 
-    @cached_property
-    def error_log(self) -> Path:
-        path = self.service.joinpath('error_log.json').resolve()
-        if not path.exists():
-            path.touch()
-        return path
+    def _rebase(self) -> None:
+        for name in 'credentials', 'private_key':
+            if (path := getattr(self, name, None)) and not path.is_absolute():
+                setattr(self, name, self.resolve(path, strict=True))
 
-    @cached_property
-    def private_key(self) -> Path:
-        if path := _validate_path(self._private_key, self.root):
-            return path
+    def _scaffold(self) -> None:
+        svc = self.service
+        for name in 'index', 'state', 'errors':
+            path = svc.joinpath(name).with_suffix('.json')
+            path.touch(exist_ok=True)
+            setattr(self, name, path)
 
-        if path := stdin.isatty() and _validate_path(
-            strpath=input('Enter CERT_PRIVATE_KEY_PATH: '),
-            parent=self.root,
-        ):
-            return path
-
-        raise MissingVariableError('CERT_PRIVATE_KEY_PATH')
-
-    def resolve(self, *segments: PathLike[str]) -> Path:
-        return self.root.joinpath(*segments).resolve()
+    def resolve(self, *segments: str | Path, strict: bool = False) -> Path:
+        return self.root.joinpath(*segments).resolve(strict=strict)
 
 
-def get_paths() -> PathsConfig:
-    return PathsConfig.default()
+def get_paths(dotenv: StrPath | None = None) -> PathsConfig:
+    return PathsConfig(dotenv=dotenv)

@@ -1,9 +1,10 @@
 """A file handling automation pipeline for internal use."""
 
 __all__ = [
+    'build_request',
     'configure',
     'download_documents',
-    'error_factory',
+    'error_from_stage',
     'extract_aspnet_form_data',
     'extract_download_info',
     'extract_filename_from_disposition',
@@ -19,7 +20,6 @@ __all__ = [
     'get_record_processor',
     'get_state_tracker',
     'make_email_record',
-    'make_graph_client',
     'new_dropbox_credential',
     'new_msal_credential',
     'parse_credential_json',

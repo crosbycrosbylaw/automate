@@ -14,7 +14,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, NoReturn, Self, Unpack, overload
+from typing import TYPE_CHECKING, Any, NoReturn, Unpack, overload
 
 import orjson
 from rampy.util import make_factory
@@ -38,16 +38,16 @@ class ErrorTracker:
     Maintains a JSON log of errors with timestamps, stages, and context.
 
     Attributes:
-        file: Path to error log JSON file.
+        path: Path to error log JSON path.
         _errors: In-memory error log.
 
     """
 
-    file: Path
-    uid: str = field(default='n/a')
+    path: Path
+    uid: str | None = field(default=None)
 
     @contextmanager
-    def track(self, uid: str) -> Generator[Self]:
+    def track(self, uid: str) -> Generator[ErrorTracker]:
         """Context manager to temporarily track errors for a specific email.
 
         Args:
@@ -57,12 +57,7 @@ class ErrorTracker:
             Self: The ErrorTracker instance with updated uid.
 
         """
-        prev_uid = self.uid
-        try:
-            self.uid = uid
-            yield self
-        finally:
-            self.uid = prev_uid
+        yield ErrorTracker(self.path, uid=uid)
 
     @property
     def prev_error(self) -> ErrorDict | None:
@@ -79,18 +74,18 @@ class ErrorTracker:
         self._load_errors()
 
     def _load_errors(self) -> None:
-        """Load error log from JSON file, creating if missing."""
-        cons = console.bind(path=self.file.as_posix())
+        """Load error log from JSON path, creating if missing."""
+        cons = console.bind(path=self.path.as_posix())
 
-        if not self.file.exists():
+        if not self.path.exists():
             self._errors = []
             self._save_errors()
 
-            cons.info('Created new error log file')
+            cons.info('Created new error log path')
             return
 
         try:
-            with self.file.open('rb') as f:
+            with self.path.open('rb') as f:
                 self._errors = orjson.loads(f.read())
         except orjson.JSONDecodeError:
             cons.exception('Failed to load error log')
@@ -101,8 +96,8 @@ class ErrorTracker:
             cons.info('Loaded error log', error_count=len(self._errors))
 
     def _save_errors(self) -> None:
-        """Save current error log to JSON file."""
-        with self.file.open('wb') as f:
+        """Save current error log to JSON path."""
+        with self.path.open('wb') as f:
             f.write(orjson.dumps(self._errors, option=orjson.OPT_INDENT_2))
 
     def _save_entry(self, **entry: Unpack[ErrorDict]) -> None:
@@ -147,7 +142,7 @@ class ErrorTracker:
                 result (IntermediaryResult | None):
                     An `IntermediaryResult` with an `ERROR` status.
                 context (dict[str, Any] | None):
-                    Additional context (e.g., file paths, API responses).
+                    Additional context (e.g., path paths, API responses).
 
             Raises:
                 The `PipelineError` created from the non-result arguments.
@@ -182,7 +177,7 @@ class ErrorTracker:
             exception (Exception | None):
                 Exception to wrap in `PipelineError`.
             context (dict[str, Any] | None):
-                Additional context (e.g., file paths, API responses).
+                Additional context (e.g., path paths, API responses).
 
         Returns:
             out (IntermediaryResult):
@@ -242,7 +237,7 @@ class ErrorTracker:
         Args:
             message: Human-readable error description.
             stage: Pipeline stage where error occurred.
-            context: Optional additional context (e.g., file paths, API responses).
+            context: Optional additional context (e.g., path paths, API responses).
             **kwds: Additional keyword arguments to include in context.
 
         """

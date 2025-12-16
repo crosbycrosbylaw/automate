@@ -1,13 +1,15 @@
 """Monitor module for eserv package."""
 
 __all__ = [
+    'build_request',
+    'collect_unprocessed_emails',
     'get_record_processor',
-    'make_graph_client',
     'process_pipeline_result',
     'status_flag_factory',
 ]
 
-from .client import make_graph_client
+from .collect import collect_unprocessed_emails
 from .flags import status_flag_factory
 from .processor import get_record_processor
+from .request import build_request
 from .result import process_pipeline_result

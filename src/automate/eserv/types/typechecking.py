@@ -5,6 +5,7 @@ import typing
 if typing.TYPE_CHECKING:
     __all__ = [
         'BaseConfig',
+        'CredentialMap',
         'CredentialType',
         'CredentialsJSON',
         'ErrorDict',
@@ -16,6 +17,7 @@ if typing.TYPE_CHECKING:
 
     from typing import Any, Literal, NotRequired, ReadOnly, Required, TypedDict, type_check_only
 
+    from automate.eserv.config._credentials import DropboxCredential, MSALCredential
     from automate.eserv.config.utils import EmailAddress
 
     type CredentialType = Literal['dropbox', 'msal']
@@ -85,3 +87,8 @@ if typing.TYPE_CHECKING:
         index_max_age: int
         manual_review_folder: str
         certificate_thumbprint: str | None
+
+    @type_check_only
+    class CredentialMap(TypedDict):
+        msal: MSALCredential
+        dropbox: DropboxCredential
