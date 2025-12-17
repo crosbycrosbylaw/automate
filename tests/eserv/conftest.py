@@ -5,10 +5,8 @@ from dataclasses import field
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, Unpack
 from unittest.mock import (
-    MagicMock,
-    Mock,
     PropertyMock,
     patch,
 )
@@ -48,6 +46,12 @@ MockFiles = TypedDict(
 
 def _mock_expiration() -> str:
     return (datetime.now(UTC) + timedelta(hours=4)).isoformat()
+
+
+class PartialPatches(TypedDict, total=False):
+    configure: Mocked[Config]
+    get_state_tracker: Mocked[EmailState]
+    get_error_tracker: Mocked[ErrorTracker]
 
 
 class PatchedDependencies(TypedDict):
@@ -122,6 +126,8 @@ class MockDependencies:
 
     # Cached mock instances
     _files: MockFiles = field(init=False)
+    _creds: Mocked[CredentialsConfig] = field(init=False)
+    _paths: Mocked[PathsConfig] = field(init=False)
     _configure: Mocked[Config] = field(init=False)
     _get_state_tracker: Mocked[EmailState] = field(init=False)
     _get_error_tracker: Mocked[ErrorTracker] = field(init=False)
@@ -184,36 +190,43 @@ class MockDependencies:
         """Get the mock file structure."""
         return self._files
 
-    def _mock_paths(self) -> Mocked[PathsConfig]:
-        namespace: dict[str, Path] = {
-            'root': self.fs['.'],
-            'credentials': self.fs['credentials.json'],
-            'private_key': self.fs['cert']['private.key'],
-            'service': self.fs['service']['.'],
-            'index': self.fs['service']['index.json'],
-            'state': self.fs['service']['state.json'],
-            'errors': self.fs['service']['errors.json'],
-        }
-        return mock(PathsConfig, namespace).new()
+    @property
+    def paths(self) -> Mocked[PathsConfig]:
+        if not hasattr(self, '_paths'):
+            namespace: dict[str, Path] = {
+                'root': self.fs['.'],
+                'credentials': self.fs['credentials.json'],
+                'private_key': self.fs['cert']['private.key'],
+                'service': self.fs['service']['.'],
+                'index': self.fs['service']['index.json'],
+                'state': self.fs['service']['state.json'],
+                'errors': self.fs['service']['errors.json'],
+            }
+            object.__setattr__(self, '_paths', mock(PathsConfig, namespace))
 
-    def _mock_creds(self) -> Mocked[CredentialsConfig]:
+        return self._paths
+
+    def convert_creds(self) -> dict[str, PropertyMock]:
         dbx_json, msal_json = self.credentials
-        namespace: dict[str, Any] = {
-            '_path': self.fs['credentials.json'],
-            'dropbox': parse_credential_json(dbx_json),
-            'msal': parse_credential_json(msal_json),
+        return {
+            'dropbox': PropertyMock(return_value=parse_credential_json(dbx_json)),
+            'msal': PropertyMock(return_value=parse_credential_json(msal_json)),
         }
-        return mock(CredentialsConfig, namespace).new()
+
+    @property
+    def creds(self) -> Mocked[CredentialsConfig]:
+        if not hasattr(self, '_creds'):
+            namespace: dict[str, Any] = {'_path': self.fs['credentials.json'], **self.convert_creds()}
+            object.__setattr__(self, '_creds', mock(CredentialsConfig, namespace))
+
+        return self._creds
 
     @property
     def configure(self) -> Mocked[Config]:
         """Return the Config factory (callable mock that returns the config instance)."""
         if not hasattr(self, '_configure'):
-            namespace = {
-                'paths': self._mock_paths(),
-                'creds': self._mock_creds(),
-            }
-            object.__setattr__(self, '_configure', mock(spec=Config, **namespace))
+            namespace = {'paths': self.paths(), 'creds': self.creds()}
+            object.__setattr__(self, '_configure', mock(Config, namespace))
 
         return self._configure
 
@@ -226,7 +239,7 @@ class MockDependencies:
                 'is_processed.return_value': False,
                 'processed': set[str](),
             }
-            object.__setattr__(self, '_get_state_tracker', mock(spec=EmailState, **namespace))
+            object.__setattr__(self, '_get_state_tracker', mock(EmailState, namespace))
 
         return self._get_state_tracker
 
@@ -300,33 +313,23 @@ class MockDependencies:
                 'clear_old_errors.return_value': None,
                 'track.side_effect': mock_track,
             }
-            object.__setattr__(self, '_get_error_tracker', mock(spec=ErrorTracker, **namespace))
+            object.__setattr__(self, '_get_error_tracker', mock(ErrorTracker, namespace))
 
         return self._get_error_tracker
 
-    def as_mock(self, string: str) -> Mock:
-        """Navigate through mock object attributes.
-
-        For factory properties (config, state_tracker, error_tracker), automatically
-        accesses .return_value to get the instance mock.
-        """
-        obj: Any = self
-
-        first, *rest = string.split('.')
-        if isinstance(value := getattr(obj, first, obj), Mocked):
-            return value.get('.'.join(rest))
-
-        for attr in first, *rest:
-            value = getattr(obj, attr, obj)
-            # If we're accessing a factory property, get the return_value (the instance)
-            if attr in ('config', 'state_tracker', 'error_tracker') and hasattr(value, 'return_value'):
-                obj = value.return_value
-            elif isinstance(value, Mock | MagicMock | PropertyMock):
-                obj = value
-            else:
-                raise TypeError(attr, value)
-
-        return obj
+    @contextmanager
+    def __call__(
+        self,
+        target: str = 'automate.eserv.core',
+        **kwds: Unpack[PartialPatches],
+    ) -> Generator[PatchedDependencies]:
+        patches: PatchedDependencies = {
+            'configure': kwds.pop('configure', self.configure),
+            'get_state_tracker': kwds.pop('get_state_tracker', self.get_state_tracker),
+            'get_error_tracker': kwds.pop('get_error_tracker', self.get_error_tracker),
+        }
+        with patch.multiple(target=target, **patches):
+            yield patches
 
 
 @pytest.fixture(name='mock_core')
@@ -340,13 +343,5 @@ def mock_core_fixture(mock_deps: MockDependencies) -> Generator[PatchedDependenc
 
     Note: Environment is already loaded by MockDependencies.__post_init__
     """
-    # Get the patches
-    patches: PatchedDependencies = {
-        'configure': mock_deps.configure,
-        'get_state_tracker': mock_deps.get_state_tracker,
-        'get_error_tracker': mock_deps.get_error_tracker,
-    }
-
-    # Apply patches and yield
-    with patch.multiple('automate.eserv.core', **patches):
+    with mock_deps() as patches:
         yield patches
