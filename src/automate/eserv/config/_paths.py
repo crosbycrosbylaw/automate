@@ -123,7 +123,7 @@ class PathsConfig:
     def _scaffold(self) -> None:
         svc = self.service
         for name in 'index', 'state', 'errors':
-            path = svc.joinpath(name).with_suffix('.json')
+            path = (svc / f'{name}.json').resolve()
             path.touch(exist_ok=True)
             setattr(self, name, path)
 

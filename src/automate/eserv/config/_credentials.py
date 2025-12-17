@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import InitVar, dataclass, field, fields
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast, no_type_check, overload
 
 import orjson
@@ -56,10 +56,9 @@ def _credential_map_factory() -> CredentialMap:
 class CredentialsConfig:
     """Manages OAuth credentials for Dropbox and Outlook."""
 
-    _path: ClassVar[Path]
     _instance: ClassVar[Self]
 
-    path: InitVar[Path]
+    path: Path = field(doc='path to the credentials JSON file')
 
     @property
     def msal(self) -> MSALCredential:
@@ -80,7 +79,7 @@ class CredentialsConfig:
 
     def __new__(cls, path: Path) -> Self:
         if not hasattr(cls, '_instance'):
-            cls._path = path.resolve(strict=True)
+            cls.path = path.resolve(strict=True)
             this = super().__new__(cls)
             this.__init__(path)
             object.__setattr__(this, '_lock', threading.Lock())
@@ -90,12 +89,8 @@ class CredentialsConfig:
 
         return cls._instance
 
-    def __post_init__(self, path: Path) -> None:
-        if self._path != path:
-            message = f'Received conflicting credential file paths:\n\n{path!s}!={self._path!s}'
-            raise RuntimeError(message)
-
-        with self._path.open('rb') as f:
+    def __post_init__(self) -> None:
+        with self.path.open('rb') as f:
             data = orjson.loads(f.read())
 
         for json in data:
@@ -137,7 +132,7 @@ class CredentialsConfig:
             self._mapping.update(mapping or {})
 
         data = [cred.export() for cred in cast('Iterable[OAuthCredential]', self._mapping.values())]
-        with self._path.open('wb') as f:
+        with self.path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 

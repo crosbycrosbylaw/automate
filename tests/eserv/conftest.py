@@ -202,7 +202,7 @@ class MockDependencies:
                 'state': self.fs['service']['state.json'],
                 'errors': self.fs['service']['errors.json'],
             }
-            object.__setattr__(self, '_paths', mock(PathsConfig, namespace))
+            object.__setattr__(self, '_paths', mock(PathsConfig, namespace, instance=True))
 
         return self._paths
 
@@ -216,8 +216,8 @@ class MockDependencies:
     @property
     def creds(self) -> Mocked[CredentialsConfig]:
         if not hasattr(self, '_creds'):
-            namespace: dict[str, Any] = {'_path': self.fs['credentials.json'], **self.convert_creds()}
-            object.__setattr__(self, '_creds', mock(CredentialsConfig, namespace))
+            namespace: dict[str, Any] = {'path': self.fs['credentials.json'], **self.convert_creds()}
+            object.__setattr__(self, '_creds', mock(CredentialsConfig, namespace, instance=True))
 
         return self._creds
 
@@ -225,7 +225,7 @@ class MockDependencies:
     def configure(self) -> Mocked[Config]:
         """Return the Config factory (callable mock that returns the config instance)."""
         if not hasattr(self, '_configure'):
-            namespace = {'paths': self.paths(), 'creds': self.creds()}
+            namespace = {'paths': self.paths, 'creds': self.creds}
             object.__setattr__(self, '_configure', mock(Config, namespace))
 
         return self._configure

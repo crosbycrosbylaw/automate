@@ -81,13 +81,13 @@ class TestPipelineInit:
     def test_state_tracker_initialization(
         self,
         mock_deps: MockDependencies,
-        mock_core: PatchedDependencies,
     ) -> None:
         """Test state tracker initialized from config."""
-        mock_state_json = mock_deps.fs['service']['state.json']
-        pipeline = Pipeline()
+        with mock_deps():
+            pipeline = Pipeline(dotenv_path=mock_deps.fs['.env.test'])
 
-        mock_core['get_state_tracker'].assert_called_once_with(mock_state_json)
+        mock_deps.get_error_tracker.assert_called_once_with(mock_deps.fs['service']['state.json'])
+
         assert pipeline.state.path == mock_deps.configure.get('paths.state')
         assert pipeline.state is mock_deps.get_state_tracker.return_value
 
