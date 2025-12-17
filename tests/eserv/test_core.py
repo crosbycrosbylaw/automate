@@ -88,7 +88,7 @@ class TestPipelineInit:
         pipeline = Pipeline()
 
         mock_core['get_state_tracker'].assert_called_once_with(mock_state_json)
-        assert pipeline.state.path == mock_deps.configure.paths.state
+        assert pipeline.state.path == mock_deps.configure.get('paths.state')
         assert pipeline.state is mock_deps.get_state_tracker.return_value
 
     def test_error_tracker_initialization(
@@ -203,7 +203,7 @@ class TestPipelineProcess:
 
             # Process should return error result
             result = pipeline.process(sample_email_record)
-            mock_deps.get_error_tracker.return_value.track.assert_called_once()
+            mock_deps.get_error_tracker.get('track').assert_called_once()
             assert result.status == status.ERROR
 
     def test_download_failure(

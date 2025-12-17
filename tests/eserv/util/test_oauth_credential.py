@@ -16,6 +16,7 @@ from msal import ConfidentialClientApplication
 from automate.eserv import *
 from automate.eserv.types import *
 from automate.eserv.util.msal_manager import _validate_token_data
+from tests.eserv.conftest import *
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -183,7 +184,7 @@ def msal_refresh_test_case(
                 seconds = exp_in - int(started_at - time.time())
                 exp_at = datetime.now(UTC) + timedelta(seconds=seconds)
 
-                result.expires_at = result._resolve_expiration().replace(microsecond=exp_at.microsecond)
+                result.expires_at = result._resolve_expiration.replace(microsecond=exp_at.microsecond)
                 expected_data['expires_at'] = exp_at.isoformat()
 
             if 'expires_at' in expected_data:
@@ -240,8 +241,7 @@ class TestTokenRefresh:
     """Test unified refresh mechanism for both Dropbox and Outlook."""
 
     def test_refresh_dropbox_success(
-        self,
-        dropbox_credential: OAuthCredential[DropboxManager],
+        self, dropbox_credential: OAuthCredential[DropboxManager], mock_deps: MockDeps
     ):
         """Test successful Dropbox token refresh."""
         dbx_refresh_test_case(
@@ -300,7 +300,7 @@ class TestTokenRefresh:
         dropbox_credential: OAuthCredential[DropboxManager],
     ):
         """Test OAuthCredential.refresh() uses handler correctly."""
-        # Create credential with mocked handler
+        # Create credential with Mocked handler
         mock_handler = Mock(return_value={'access_token': 'new_token', 'expires_in': 3600})
 
         with patch.object((cred := dropbox_credential).manager, '_refresh_token', mock_handler):
@@ -308,7 +308,7 @@ class TestTokenRefresh:
 
             # Assert new credential returned
             assert refreshed.access_token == 'new_token'
-            assert refreshed.expiration() > datetime.now(UTC)
+            assert refreshed.expiration > datetime.now(UTC)
 
     def test_refresh_without_manager_factory_raises_error(
         self,
@@ -349,10 +349,10 @@ class TestCredentialUpdate:
         assert updated.access_token == 'new_token'
         assert updated.refresh_token == 'new_refresh'
 
-        _ = updated.expiration()
+        _ = updated.expiration
 
-        assert updated.expiration() > datetime.now(UTC)
-        assert updated.expiration() < datetime.now(UTC) + timedelta(hours=2)
+        assert updated.expiration > datetime.now(UTC)
+        assert updated.expiration < datetime.now(UTC) + timedelta(hours=2)
 
         # Assert original unchanged (immutable pattern)
         assert original.access_token == 'old_token'
@@ -373,7 +373,7 @@ class TestCredentialUpdate:
 
         assert updated.access_token == expected['access_token']
         assert updated.expires_at is not None
-        assert updated.expiration().isoformat() == expected['expires_at']
+        assert updated.expiration.isoformat() == expected['expires_at']
 
     def test_update_preserves_unchanged_fields(
         self,
@@ -547,9 +547,9 @@ class TestCredentialSerialization:
         assert exported['refresh_token'] == cred.refresh_token
 
         assert cred.expires_at is not None
-        # export() already calls expiration().isoformat() via the dynamic metadata
+        # export() already calls expiration.isoformat() via the dynamic metadata
         assert isinstance(exported['expires_at'], str)
-        assert exported['expires_at'] == cred.expiration().isoformat()
+        assert exported['expires_at'] == cred.expiration.isoformat()
 
         # Assert no nested dicts
         assert 'client' not in exported
@@ -565,7 +565,7 @@ class TestCredentialSerialization:
         exported = cred.export()
 
         assert 'expires_at' in exported
-        # When expires_at is None, expiration() returns a past date (to force refresh)
+        # When expires_at is None, expiration returns a past date (to force refresh)
         # and export() converts it to ISO string
         assert isinstance(exported['expires_at'], str)
         assert datetime.fromisoformat(exported['expires_at']) < datetime.now(UTC)
@@ -808,7 +808,7 @@ class TestMSALIntegration:
             access_token='new_token',
             scopes=['Mail.Read', 'offline_access'],
             expires_in=-1,
-        )  # refresh with outdated expiry
+        )  # refresh with expired expiry
 
         test_data = [microsoft_credential.export()]
 

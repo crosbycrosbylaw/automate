@@ -11,18 +11,17 @@ from tests.eserv.conftest import *
 MIN_TOKEN_LENGTH: Final[int] = 10
 
 
-def test_config_from_env(mock_deps: MockDependencies):
+def test_config_from_env(mock_deps: MockDependencies, mock_core: PatchedDependencies):
     """Test Config.from_env() loads all configuration."""
     mock_env = mock_deps.fs['.env.test']
+
     config: Config = configure(dotenv_path=mock_env)
 
-    smtp = config.smtp()
-
     # Verify SMTP config
-    assert smtp['server'] == 'smtp.example.com'
-    assert smtp['port'] == 587
-    assert '@' in smtp['sender']
-    assert '@' in smtp['recipient']
+    assert config.smtp_server == mock_deps.environment['SMTP_SERVER']
+    assert config.smtp_port == int(mock_deps.environment['SMTP_PORT'])
+    assert '@' in config.smtp_sender
+    assert '@' in config.smtp_recipient
 
     # Verify Dropbox config
     assert (dbx_cred := config.creds.dropbox)

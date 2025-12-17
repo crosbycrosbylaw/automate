@@ -1,1 +1,2 @@
-# test namespace package
+__all__ = ['Mocked', 'mock']
+from .__lib__.mocked import *

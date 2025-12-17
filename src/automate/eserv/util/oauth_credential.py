@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, NewType, Self, TypeGuard, overload
 
 from azure.core.credentials import AccessToken
 from rampy import make_factory
@@ -11,7 +11,47 @@ from rampy import make_factory
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from rampy.structs.jseq import serializable
+
     from automate.eserv.types import *
+
+
+ISODateString = NewType('ISODateString', str)
+
+
+def is_isodatestring(x: object) -> TypeGuard[ISODateString]:
+    if not isinstance(x, str):
+        return False
+    try:
+        _ = datetime.fromisoformat(x)
+    except ValueError, TypeError:
+        return False
+    else:
+        return True
+
+
+def _update_expiration(cred: OAuthCredential[Any]) -> datetime:
+    props = cred.properties
+
+    def _update(value: datetime | None = None) -> datetime:
+        if value is None:
+            value = datetime.now(UTC) - timedelta(days=1)
+        props.setdefault('expires_at', value.isoformat())
+        return value
+
+    if 'expires_in' in props:
+        issued_at = props.pop('issued_at', datetime.now(UTC).isoformat())
+        seconds = props.pop('expires_in', 3600)
+        if is_isodatestring(issued_at) and isinstance(seconds, int | float):
+            return _update(datetime.fromisoformat(issued_at) + timedelta(seconds=seconds))
+
+    if 'expires_at' in props:
+        if is_isodatestring(raw := props.pop('expires_at')):
+            return _update(datetime.fromisoformat(raw))
+        if isinstance(raw, datetime):
+            return _update(raw)
+
+    return _update()
 
 
 @dataclass
@@ -24,6 +64,9 @@ class BaseCredential:
     access_token: str
     refresh_token: str
 
+    factory: Callable[[Self], Any] = field(repr=False, metadata={'internal': True})
+    account: str | None = field(default=None)
+
 
 @dataclass
 class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
@@ -32,40 +75,27 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
     The string representation of an `OAuthCredential` evaluates to it's access token.
     """
 
-    factory: Callable[[Self], T] = field(repr=False, metadata={'internal': True})
-    account: str | None = field(default=None)
-    properties: dict[str, Any] = field(default_factory=dict, metadata={'internal': True})
-    expires_at: str | datetime | None = field(default=None)
+    properties: dict[str, serializable] = field(
+        default_factory=dict,
+        metadata={'internal': True},
+    )
 
     @cached_property
     def manager(self) -> T:
         return self.factory(self)
 
     @property
-    def outdated(self) -> bool:
-        return datetime.now(UTC) > (self.expiration() - timedelta(minutes=5))
+    def expired(self) -> bool:
+        return not self.__bool__()
 
+    @property
     def expiration(self) -> datetime:
-        if not isinstance(self.expires_at, str):
-            dt = self._resolve_expiration()
-            self.expires_at = dt.isoformat()
-        else:
-            dt = datetime.fromisoformat(self.expires_at)
-
-        return dt
-
-    def _resolve_expiration(self) -> datetime:
-        if isinstance(self.expires_at, datetime):
-            return self.expires_at
-
-        if self.expires_at is not None:
-            return datetime.fromisoformat(self.expires_at)
-
-        if expires_in := self.get('expires_in', 0):
-            issued_at = self.get('issued_at', datetime.now(UTC).isoformat())
-            return datetime.fromisoformat(issued_at) + timedelta(seconds=expires_in)
-
-        return datetime.now(UTC) - timedelta(days=1)  # force refresh
+        if current := self.get('expires_at'):
+            if is_isodatestring(current):
+                return datetime.fromisoformat(current)
+            if isinstance(current, datetime):
+                return current
+        return _update_expiration(self)
 
     def __str__(self) -> str:
         """Return the access token as string representation."""
@@ -73,7 +103,11 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
 
     def __int__(self) -> int:
         """Return the expiration datetime as a UNIX timestamp."""
-        return int(self._resolve_expiration().timestamp())
+        return int(self.expiration.timestamp())
+
+    def __bool__(self) -> bool:
+        """Return True if the credential has not yet expired."""
+        return datetime.now(UTC) <= (self.expiration - timedelta(minutes=5))
 
     def __getitem__(self, name: str) -> Any:
         return self.properties[name]
@@ -84,7 +118,7 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
     def __contains__(self, name: str) -> bool:
         return self.properties.__contains__(name)
 
-    def get[D = object](self, name: str, default: D | None = None) -> D:
+    def get(self, name: str, default: serializable = None) -> serializable:
         return self.properties.get(name, default)
 
     def print(
@@ -118,12 +152,8 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         data: dict[str, Any] = {}
 
         for f in fields(self):
-            if 'internal' in f.metadata:
-                continue
-            if isinstance(x := getattr(self, f.name), datetime):
-                data[f.name] = x.isoformat()
-            else:
-                data[f.name] = x
+            if 'internal' not in f.metadata:
+                data[f.name] = getattr(self, f.name)
 
         return {**data, **self.properties}
 
@@ -151,16 +181,12 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
             elif isinstance(scopes, str):
                 changes['scope'] = scopes
 
-        if expires_at := token_data.get('expires_at'):
-            changes['expires_at'] = expires_at
-        elif expires_in := token_data.get('expires_in'):
-            # Store expires_in and issued_at in properties (not fields)
-            new_props = self.properties.copy()
-            new_props['expires_in'] = expires_in
-            new_props['issued_at'] = token_data.get('issued_at', datetime.now(UTC).isoformat())
-            changes['properties'] = new_props
-            # Set expires_at to None so expiration() will calculate it from properties
-            changes['expires_at'] = None
+        if expires_at := token_data.pop('expires_at', None):
+            changes['properties'] = {**self.properties, 'expires_at': expires_at}
+
+        elif expires_in := token_data.pop('expires_in', None):
+            issued_at = token_data.get('issued_at', datetime.now(UTC).isoformat())
+            changes['properties'] = {**self.properties, 'expires_in': expires_in, 'issued_at': issued_at}
 
         return replace(self, **changes)
 

@@ -6,31 +6,24 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
-from unittest.mock import MagicMock, Mock, PropertyMock, create_autospec, patch
+from unittest.mock import (
+    MagicMock,
+    Mock,
+    PropertyMock,
+    patch,
+)
 
 import orjson
 import pytest
 from pytest_fixture_classes import fixture_class
-from rampy import test
 
 from automate.eserv import *
 from automate.eserv.core import *
 from automate.eserv.types import *
+from tests import *
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
-
-
-class _Mocked[T](MagicMock):
-    return_value: T
-
-    __call__: Callable[..., T]
-
-
-type MockType[T] = _Mocked[T]
-
-
-directory = test.directory
+    from collections.abc import Generator
 
 
 _MockCertFiles = TypedDict(
@@ -58,9 +51,9 @@ def _mock_expiration() -> str:
 
 
 class PatchedDependencies(TypedDict):
-    configure: MockType[Config]
-    get_state_tracker: MockType[EmailState]
-    get_error_tracker: MockType[ErrorTracker]
+    configure: Mocked[Config]
+    get_state_tracker: Mocked[EmailState]
+    get_error_tracker: Mocked[ErrorTracker]
 
 
 @fixture_class(name='mock_deps')
@@ -109,7 +102,7 @@ class MockDependencies:
                 'client_secret': 'test-dropbox-client-secret',
                 'access_token': 'test-dropbox-access-token',
                 'token_type': 'bearer',
-                'expires_at': f'{_mock_expiration()}',
+                'expires_at': f'{_mock_expiration}',
                 'refresh_token': 'test-dropbox-refresh-token',
                 'scope': 'account_info.read files.content.read files.content.write files.metadata.read',
             },
@@ -120,7 +113,7 @@ class MockDependencies:
                 'client_secret': 'test-msal-client-secret',
                 'token_type': 'Bearer',
                 'scope': 'Mail.ReadWrite openid profile email',
-                'expires_at': f'{_mock_expiration()}',
+                'expires_at': f'{_mock_expiration}',
                 'access_token': 'test-msal-access-token',
                 'refresh_token': 'test-msal-refresh-token',
             },
@@ -129,9 +122,9 @@ class MockDependencies:
 
     # Cached mock instances
     _files: MockFiles = field(init=False)
-    _configure: MockType[Config] = field(init=False)
-    _get_state_tracker: MockType[EmailState] = field(init=False)
-    _get_error_tracker: MockType[ErrorTracker] = field(init=False)
+    _configure: Mocked[Config] = field(init=False)
+    _get_state_tracker: Mocked[EmailState] = field(init=False)
+    _get_error_tracker: Mocked[ErrorTracker] = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize mock file structure and environment."""
@@ -142,34 +135,23 @@ class MockDependencies:
         for d in self.root, self.service, self.cert:
             d.mkdir(parents=True, exist_ok=True)
 
-        creds_json = self.root / 'credentials.json'
-        env_test = self.root / '.env.test'
-
-        for f in [creds_json, env_test]:
+        for f in [
+            credentials_json := self.root / 'credentials.json',
+            state_json := self.service / 'state.json',
+            index_json := self.service / 'index.json',
+            errors_json := self.service / 'errors.json',
+            dotenv_test := self.root / '.env.test',
+            private_key := self.cert / 'private.key',
+        ]:
             f.touch(exist_ok=True)
 
         self.environment['PROJECT_ROOT'] = str(self.root)
         self.environment['SERVICE_DIR'] = str(self.service)
-        self.environment['CREDENTIALS_FILE'] = str(creds_json)
-
-        creds_json.write_bytes(orjson.dumps(self.credentials, option=orjson.OPT_APPEND_NEWLINE))
-        env_test.write_text('\n' + '\n'.join(f'{k}={v}' for k, v in self.environment.items()) + '\n')
-
-        # Setup certificate files
-        private_key = self.cert / 'private.key'
-        private_key.touch(exist_ok=True)
+        self.environment['CREDENTIALS_FILE'] = str(credentials_json)
         self.environment['CERT_PRIVATE_KEY_FILE'] = str(private_key)
 
-        # Setup service files
-        state_json = self.service / 'state.json'
-        index_json = self.service / 'index.json'
-        errors_json = self.service / 'errors.json'
-
-        for f in [state_json, index_json, errors_json]:
-            f.touch(exist_ok=True)
-
-        self.environment['STATE_FILE'] = str(state_json)
-        self.environment['INDEX_FILE'] = str(index_json)
+        credentials_json.write_bytes(orjson.dumps(self.credentials, option=orjson.OPT_APPEND_NEWLINE))
+        dotenv_test.write_text('\n' + '\n'.join(f'{k}={v}' for k, v in self.environment.items()) + '\n')
 
         # Cache files structure
         object.__setattr__(
@@ -177,8 +159,8 @@ class MockDependencies:
             '_files',
             {
                 '.': self.root,
-                '.env.test': env_test,
-                'credentials.json': creds_json,
+                '.env.test': dotenv_test,
+                'credentials.json': credentials_json,
                 'cert': {
                     '.': self.cert,
                     'private.key': private_key,
@@ -195,59 +177,61 @@ class MockDependencies:
         # Load environment for test
         import dotenv
 
-        dotenv.load_dotenv(env_test)
+        dotenv.load_dotenv(dotenv_test)
 
     @property
     def fs(self) -> MockFiles:
         """Get the mock file structure."""
         return self._files
 
+    def _mock_paths(self) -> Mocked[PathsConfig]:
+        namespace: dict[str, Path] = {
+            'root': self.fs['.'],
+            'credentials': self.fs['credentials.json'],
+            'private_key': self.fs['cert']['private.key'],
+            'service': self.fs['service']['.'],
+            'index': self.fs['service']['index.json'],
+            'state': self.fs['service']['state.json'],
+            'errors': self.fs['service']['errors.json'],
+        }
+        return mock(PathsConfig, namespace).new()
+
+    def _mock_creds(self) -> Mocked[CredentialsConfig]:
+        dbx_json, msal_json = self.credentials
+        namespace: dict[str, Any] = {
+            '_path': self.fs['credentials.json'],
+            'dropbox': parse_credential_json(dbx_json),
+            'msal': parse_credential_json(msal_json),
+        }
+        return mock(CredentialsConfig, namespace).new()
+
     @property
-    def configure(self) -> MockType[Config]:
+    def configure(self) -> Mocked[Config]:
         """Return the Config factory (callable mock that returns the config instance)."""
         if not hasattr(self, '_configure'):
-            mock_config = create_autospec(spec=Config, instance=True)
+            namespace = {
+                'paths': self._mock_paths(),
+                'creds': self._mock_creds(),
+            }
+            object.__setattr__(self, '_configure', mock(spec=Config, **namespace))
 
-            # Setup paths mock with all required attributes (based on PathsConfig)
-            mock_paths = create_autospec(spec=PathsConfig, instance=True)
-            mock_paths.root = self.fs['.']
-            mock_paths.credentials = self.fs['credentials.json']
-            mock_paths.private_key = self.fs['cert']['private.key']
-            mock_paths.service = self.fs['service']['.']
-            mock_paths.state = self.fs['service']['state.json']
-            mock_paths.index = self.fs['service']['index.json']
-            mock_paths.errors = self.fs['service']['errors.json']
-            mock_config.paths = mock_paths
-
-            # Setup creds mock
-            mock_config.creds = create_autospec(
-                spec=CredentialsConfig,
-                instance=True,
-            )
-
-            # Cache both the factory and the instance
-            mock_factory = MagicMock(spec=Config, return_value=mock_config)
-            # Allow attribute access on factory to passthrough to instance
-            mock_factory.paths = mock_paths
-            object.__setattr__(self, '_configure', mock_factory)
         return self._configure
 
     @property
-    def get_state_tracker(self) -> MockType[EmailState]:
+    def get_state_tracker(self) -> Mocked[EmailState]:
         """Return the EmailState factory (callable mock that returns the state tracker instance)."""
         if not hasattr(self, '_get_state_tracker'):
-            mock_state_tracker = create_autospec(spec=EmailState, instance=True)
-            # Based on EmailState API: only has .path attribute
-            mock_state_tracker.path = self.fs['service']['state.json']
-            mock_state_tracker.is_processed = Mock(return_value=False)
-            mock_state_tracker.processed = set[str]()
-            # Cache both the factory and the instance
-            mock_factory = MagicMock(spec=EmailState, return_value=mock_state_tracker)
-            object.__setattr__(self, '_get_state_tracker', mock_factory)
+            namespace = {
+                'path': self.fs['service']['state.json'],
+                'is_processed.return_value': False,
+                'processed': set[str](),
+            }
+            object.__setattr__(self, '_get_state_tracker', mock(spec=EmailState, **namespace))
+
         return self._get_state_tracker
 
     @property
-    def get_error_tracker(self) -> MockType[ErrorTracker]:
+    def get_error_tracker(self) -> Mocked[ErrorTracker]:
         """Return the ErrorTracker factory (callable mock that returns the error tracker instance)."""
         if not hasattr(self, '_get_error_tracker'):
             errors: list[ErrorDict] = []
@@ -288,41 +272,35 @@ class MockDependencies:
                 else:
                     return value
 
-            errors_json = self.fs['service']['errors.json']
-
             # Based on ErrorTracker API: has .path attribute (not .file)
-            mock_error_tracker = create_autospec(spec=ErrorTracker, instance=True, path=errors_json)
-            mock_error_tracker.path = errors_json
-            mock_error_tracker.warning = Mock(return_value=None)
-            mock_error_tracker.error = Mock(side_effect=mock_error)
-            mock_error_tracker.prev_error = PropertyMock(side_effect=mock_prev)
-            mock_error_tracker.clear_old_errors = Mock(return_value=None)
-
-            per_uid = create_autospec(ErrorTracker, instance=True, path=errors_json)
-            per_uid.warning = mock_error_tracker.warning
 
             @contextmanager
             def mock_track(uid: str | None = None) -> Generator[ErrorTracker]:
-                per_uid.uid = uid
-                per_uid.error = Mock(side_effect=partial(mock_error, uid=uid))
 
                 def mock_prev() -> ErrorDict | None:
-                    return next((e for e in reversed(errors) if e.get('uid') == per_uid.uid), None)
+                    return next((e for e in reversed(errors) if e.get('uid') == uid), None)
 
-                per_uid.prev_error = PropertyMock(side_effect=mock_prev)
+                subtracker = self.get_error_tracker.new(**{
+                    'path': self.fs['service']['errors.json'],
+                    'uid': uid,
+                    'error.side_effect': partial(mock_error, uid=uid),
+                    'prev_error': PropertyMock(side_effect=mock_prev),
+                })
 
                 try:
-                    yield per_uid
+                    yield subtracker
                 finally:
-                    per_uid.uid = None
-                    per_uid.error = mock_error_tracker.error
-                    per_uid.prev_error = mock_error_tracker.prev_error
+                    pass
 
-            mock_error_tracker.track = Mock(side_effect=mock_track)
-
-            # Cache both the factory and the instance
-            mock_factory = MagicMock(spec=ErrorTracker, return_value=mock_error_tracker)
-            object.__setattr__(self, '_get_error_tracker', mock_factory)
+            namespace = {
+                'path': self.fs['service']['errors.json'],
+                'prev_error': PropertyMock(side_effect=mock_prev),
+                'warning.return_value': None,
+                'error.side_effect': mock_error,
+                'clear_old_errors.return_value': None,
+                'track.side_effect': mock_track,
+            }
+            object.__setattr__(self, '_get_error_tracker', mock(spec=ErrorTracker, **namespace))
 
         return self._get_error_tracker
 
@@ -333,9 +311,13 @@ class MockDependencies:
         accesses .return_value to get the instance mock.
         """
         obj: Any = self
-        for attr in string.split('.'):
-            value = getattr(obj, attr, obj)
 
+        first, *rest = string.split('.')
+        if isinstance(value := getattr(obj, first, obj), Mocked):
+            return value.get('.'.join(rest))
+
+        for attr in first, *rest:
+            value = getattr(obj, attr, obj)
             # If we're accessing a factory property, get the return_value (the instance)
             if attr in ('config', 'state_tracker', 'error_tracker') and hasattr(value, 'return_value'):
                 obj = value.return_value

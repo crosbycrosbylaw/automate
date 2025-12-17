@@ -16,30 +16,35 @@ if TYPE_CHECKING:
     from automate.eserv.types import *
 
 
+def _nest_properties(data: CredentialsJSON | dict[str, Any]) -> dict[str, Any]:
+    field_names = {f.name for f in fields(OAuthCredential) if 'internal' not in f.metadata}
+    kwds: dict[str, Any] = dict.fromkeys(field_names, '')
+    properties: dict[str, Any] = {}
+
+    for key, value in data.items():
+        if key in field_names:
+            kwds[key] = value
+        else:
+            properties[key] = value
+
+    kwds['properties'] = properties
+    return kwds
+
+
 def parse_credential_json(
-    data: CredentialsJSON | dict[str, Any],
+    json: CredentialsJSON | dict[str, Any],
 ) -> OAuthCredential[Any]:
     """Parse fields from token data."""
-    keywords: dict[str, Any] = {}
+    from automate.eserv import new_dropbox_credential, new_msal_credential
 
-    keywords.update((f.name, value) for f in fields(OAuthCredential) if (value := data.get(f.name)))
-    keywords['properties'] = {key: val for key, val in data.items() if key not in keywords}
-
-    match data['type']:
+    data = _nest_properties(json)
+    match json['type']:
         case 'dropbox':
-            from automate.eserv import new_dropbox_credential
-
-            cred = new_dropbox_credential(**keywords)
-
+            return new_dropbox_credential(**data)
         case 'msal':
-            from automate.eserv import new_msal_credential
-
-            cred = new_msal_credential(**keywords)
-
+            return new_msal_credential(**data)
         case _:
-            cred = OAuthCredential(**keywords)
-
-    return cred
+            return OAuthCredential(**data)
 
 
 @no_type_check
@@ -61,14 +66,14 @@ class CredentialsConfig:
         """Retrieve an MSAL credential, refreshing and caching the value as needed."""
         with self._lock:
             cred: MSALCredential = self._mapping['msal']
-            return cred if not cred.outdated else self._refresh(cred)
+            return cred if not cred.expired else self._refresh(cred)
 
     @property
     def dropbox(self) -> DropboxCredential:
         """Retrieve a Dropbox credential, refreshing and caching the value as needed."""
         with self._lock:
             cred: DropboxCredential = self._mapping['dropbox']
-            return cred if not cred.outdated else self._refresh(cred)
+            return cred if not cred.expired else self._refresh(cred)
 
     _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
     _mapping: CredentialMap = field(init=False, repr=False, default_factory=_credential_map_factory)
@@ -82,6 +87,7 @@ class CredentialsConfig:
             object.__setattr__(this, '_mapping', {})
 
             cls._instance = this
+
         return cls._instance
 
     def __post_init__(self, path: Path) -> None:
