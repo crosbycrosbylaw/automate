@@ -5,7 +5,6 @@ __all__ = ['component']
 # ruff: noqa: RUF013
 # pyright: reportArgumentType=false
 
-import contextvars
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -17,11 +16,9 @@ if TYPE_CHECKING:
     from types import FunctionType
     from typing import Any
 
-dotenv_path = contextvars.ContextVar[str | None]('dotenv', default=None)
 
-
-def eserv():
-    return eserv_pipeline(None if not (path := dotenv_path.get()) else Path(path))
+def eserv(path: str | None):
+    return eserv_pipeline(None if not path else Path(path))
 
 
 def process(
@@ -54,8 +51,6 @@ def process(
         ProcessedResult with processing status and error information if applicable.
 
     """
-    dotenv_path.set(dotenv)
-
     kwds: dict[str, Any] = {
         'uid': uid,
         'subject': subject,
@@ -66,7 +61,7 @@ def process(
     if received:
         kwds['received_at'] = datetime.fromisoformat(received)
 
-    eserv().execute(make_email_record(body, **kwds))
+    eserv(dotenv).execute(make_email_record(body, **kwds))
 
 
 def monitor(dotenv: str = None, lookback: int = 1):
@@ -84,8 +79,7 @@ def monitor(dotenv: str = None, lookback: int = 1):
     """
     import asyncio
 
-    dotenv_path.set(dotenv)
-    app = eserv()
+    app = eserv(dotenv)
     object.__setattr__(app.config, 'monitor_num_days', lookback)
     asyncio.run(app.monitor())
 
@@ -110,10 +104,10 @@ def verify(
                 Does nothing if `properties` are provided.
 
     """
-    dotenv_path.set(dotenv)
+    creds = eserv(dotenv).config.creds
     for key in 'msal', 'dropbox':
         if not query or query in key:
-            eserv().config.creds[key].print(insecure=insecure, select=properties)
+            creds[key].print(insecure=insecure, select=properties)
 
 
 component: Final[dict[str, FunctionType]] = {'process': process, 'monitor': monitor, 'verify': verify}

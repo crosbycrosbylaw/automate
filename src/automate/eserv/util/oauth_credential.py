@@ -130,14 +130,13 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
         from setup_console import console
 
         console.info(
-            f'{self.type} credential',
+            f'{(self.type.capitalize if len(self.type) > 5 else self.type.upper)()} credential',
             **{
                 key: str(value)
                 for key, value in self.export().items()
                 if any([
                     select and key in select,
-                    insecure is True,
-                    any(x in key for x in ('token', 'secret')),
+                    insecure or not any(x in key for x in ('token', 'secret')),
                 ])
             },
         )
