@@ -3,7 +3,6 @@ __all__ = [
     'CaseMatch',
     'DropboxCredential',
     'DropboxManager',
-    'EmailState',
     'ErrorTracker',
     'FolderMatcher',
     'IndexCache',
@@ -12,13 +11,14 @@ __all__ = [
     'Notifier',
     'OAuthCredential',
     'PartyExtractor',
+    'StateTracker',
 ]
 
 
 from dataclasses import dataclass
 
 from .dbx_manager import DropboxManager
-from .email_state import EmailState
+from .email_state import StateTracker
 from .error_tracking import ErrorTracker
 from .index_cache import IndexCache
 from .msal_manager import MSALManager

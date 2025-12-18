@@ -78,7 +78,9 @@ async def collect_unprocessed_emails(
     app: GraphServiceClient,
     received_after: datetime,
     path_segments: list[str],
-    processed_uids: set[str],
+    processed_uids: set[str] | None = None,
+    batch_size: int = 50,
+    single_batch: bool = False,
 ) -> list[EmailRecord]:
     """Fetch emails from monitoring folder, excluding any that were already processed.
 
@@ -109,13 +111,13 @@ async def collect_unprocessed_emails(
     request = build_request(
         app.me.mail_folders.by_mail_folder_id(fid).messages,
         filter=f'receivedDateTime ge {received_after.isoformat()}Z',
-        top=50,
+        top=batch_size,
         select=['id', 'from', 'subject', 'receivedDateTime', 'bodyPreview', 'body'],
-        count=True,
+        count=not single_batch,
     )
 
     for m in await request.collect():
-        if not m.id or m.id in processed_uids:
+        if not m.id or (processed_uids and m.id in processed_uids):
             continue
 
         if not (content := getattr(m.body, 'content', None)):

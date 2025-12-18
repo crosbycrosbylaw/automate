@@ -50,13 +50,13 @@ def _mock_expiration() -> str:
 
 class PartialPatches(TypedDict, total=False):
     configure: Mocked[Config]
-    get_state_tracker: Mocked[EmailState]
+    get_state_tracker: Mocked[StateTracker]
     get_error_tracker: Mocked[ErrorTracker]
 
 
 class PatchedDependencies(TypedDict):
     configure: Mocked[Config]
-    get_state_tracker: Mocked[EmailState]
+    get_state_tracker: Mocked[StateTracker]
     get_error_tracker: Mocked[ErrorTracker]
 
 
@@ -67,7 +67,7 @@ class MockDependencies:
     Provides:
         - files: MockFiles with temporary file structure
         - config: Config factory mock (call .return_value for instance)
-        - state_tracker: EmailState factory mock
+        - state_tracker: StateTracker factory mock
         - error_tracker: ErrorTracker factory mock
         - as_mock(): Navigate mock attributes
     """
@@ -129,7 +129,7 @@ class MockDependencies:
     _creds: Mocked[CredentialsConfig] = field(init=False)
     _paths: Mocked[PathsConfig] = field(init=False)
     _configure: Mocked[Config] = field(init=False)
-    _get_state_tracker: Mocked[EmailState] = field(init=False)
+    _get_state_tracker: Mocked[StateTracker] = field(init=False)
     _get_error_tracker: Mocked[ErrorTracker] = field(init=False)
 
     def __post_init__(self) -> None:
@@ -231,15 +231,15 @@ class MockDependencies:
         return self._configure
 
     @property
-    def get_state_tracker(self) -> Mocked[EmailState]:
-        """Return the EmailState factory (callable mock that returns the state tracker instance)."""
+    def get_state_tracker(self) -> Mocked[StateTracker]:
+        """Return the StateTracker factory (callable mock that returns the state tracker instance)."""
         if not hasattr(self, '_get_state_tracker'):
             namespace = {
                 'path': self.fs['service']['state.json'],
                 'is_processed.return_value': False,
                 'processed': set[str](),
             }
-            object.__setattr__(self, '_get_state_tracker', mock(EmailState, namespace))
+            object.__setattr__(self, '_get_state_tracker', mock(StateTracker, namespace))
 
         return self._get_state_tracker
 

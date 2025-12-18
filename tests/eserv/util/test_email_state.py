@@ -25,7 +25,7 @@ def create_test_record(uid: str, subject: str) -> EmailRecord:
     )
 
 
-class TestEmailStateBasic:
+class TestStateTrackerBasic:
     """Test basic email state tracking operations."""
 
     def test_unprocessed_uid_returns_false(self, directory: Path) -> None:
@@ -47,7 +47,7 @@ class TestEmailStateBasic:
         assert 'basic-test-789' in state.processed
 
 
-class TestEmailStateDuplicates:
+class TestStateTrackerDuplicates:
     """Test duplicate email detection."""
 
     def test_duplicate_recording_idempotent(self, directory: Path) -> None:
@@ -66,7 +66,7 @@ class TestEmailStateDuplicates:
         assert len(state.processed) == 1
 
 
-class TestEmailStatePersistence:
+class TestStateTrackerPersistence:
     """Test state persistence across instances."""
 
     def test_state_persists_across_instances(self, directory: Path) -> None:
@@ -84,7 +84,7 @@ class TestEmailStatePersistence:
         assert 'test-uid-123' in state2.processed
 
 
-class TestEmailStateClearFlags:
+class TestStateTrackerClearFlags:
     """Test clear_flags functionality for manual reprocessing."""
 
     def test_clear_flags_removes_uid(self, directory: Path) -> None:

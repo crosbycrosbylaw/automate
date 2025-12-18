@@ -159,7 +159,7 @@ pixi run push
 
 **Utility Subpackage (`util/`):**
 
--   **`email_state.py`** - `EmailState`: UID-based audit log for processed emails
+-   **`email_state.py`** - `StateTracker`: UID-based audit log for processed emails
     -   Fresh start (no weekly rotation, UID primary key)
     -   Overloaded `record()` for flexible input types
     -   `processed` property returns set of UIDs
@@ -216,6 +216,7 @@ pixi run push
 **Changes:**
 
 -   **Complete test suite from scratch** - Created 43 comprehensive tests (29 passing, 14 integration tests with caching challenges)
+
     -   11 tests for OAuthCredential properties (`__str__`, `__int__`, `__bool__`, `__getitem__`, `__setitem__`, `__contains__`, `get`, `get_token`, `expiration`, `expired`)
     -   3 tests for OAuthCredential `export()` method (flat dict, internal field exclusion, properties inclusion)
     -   8 tests for OAuthCredential `reconstruct()` method (token updates, expiration handling, scope normalization, immutability)
@@ -226,18 +227,20 @@ pixi run push
     -   2 tests for MSALManager certificate auth (certificate usage, secret fallback)
 
 -   **Testing patterns used:**
+
     -   Pattern C (Class-Based) for unit tests - cleanest for pure unit tests without complex mocking
     -   Simple pytest fixtures for credential creation with fresh expiration times
     -   Direct patching at module level for integration tests
     -   Focus on unit test foundation (test pyramid base) - properties, methods, immutability
 
 -   **Fixed conftest.py bug** - Removed erroneous `()` calls on `self.paths` and `self.creds` properties (line 228)
+
     -   These are properties returning Mock objects, not methods
     -   Calling them triggered signature validation requiring `path` argument
 
 -   **Challenges with integration tests:**
     -   `@cached_property` on `manager` makes mocking tricky - property cached on first access
-    -   Patches must be active *before* first manager access
+    -   Patches must be active _before_ first manager access
     -   14 integration tests demonstrate correct behavior but have caching coordination issues
     -   Production code works correctly; test infrastructure needs refinement
 
@@ -268,12 +271,14 @@ pixi run push
 **Changes:**
 
 -   **Fixed test_processor.py** - All 11 tests now passing
+
     -   Removed obsolete `mock_graph` and `mock_collect` fixtures using old pattern
     -   Refactored TestProcessBatch to patch `GraphServiceClient` and `collect_unprocessed_emails` at correct locations
     -   Updated test_flag_application_failure_continues_processing with same pattern
     -   Key fix: patch at definition site (`automate.eserv.monitor.collect.collect_unprocessed_emails`) not import site
 
 -   **Fixed majority of test_oauth_credential.py** - 29/43 tests passing (was 16/43)
+
     -   Fixed `microsoft_credential` fixture to set `authority` property for MSALManager
     -   Fixed `factory` parameter name (was `manager_factory`)
     -   Fixed `expiration()` return type expectations (returns datetime, export converts to ISO string)
@@ -290,8 +295,9 @@ pixi run push
     -   Properly supports OAuth2 responses with relative expiration times
 
 **Test results:** 117/135 tests passing (87%)
-- 18 failures remaining (all in test_oauth_credential.py MSAL integration and certificate auth tests)
-- All other test files passing: test_core, test_processor, test_client, test_download, test_upload, test_config, test_email_state, test_error_tracking, test_index_cache, test_target_finder, all extractor tests
+
+-   18 failures remaining (all in test_oauth_credential.py MSAL integration and certificate auth tests)
+-   All other test files passing: test_core, test_processor, test_client, test_download, test_upload, test_config, test_email_state, test_error_tracking, test_index_cache, test_target_finder, all extractor tests
 
 **Outstanding issues:** MSAL integration tests need additional mocking updates for multi-tier authentication fallback patterns.
 
@@ -521,9 +527,10 @@ pixi run push
 -   ✅ `test_integration.py` - Basic workflows covered (4 tests) - ALL PASSING
 
 **Remaining work:**
-- Fix 14 MSAL integration tests (silent refresh, account cache, token normalization, dual mode, app recreation)
-- Fix 3 certificate authentication tests (fallback patterns, refresh chain)
-- Fix 1 protocol compliance test (MSALManager TokenManager implementation)
+
+-   Fix 14 MSAL integration tests (silent refresh, account cache, token normalization, dual mode, app recreation)
+-   Fix 3 certificate authentication tests (fallback patterns, refresh chain)
+-   Fix 1 protocol compliance test (MSALManager TokenManager implementation)
 
 ---
 
@@ -534,6 +541,7 @@ pixi run push
 Core functionality stable with 117/135 tests passing. All critical paths tested (email monitoring, document processing, OAuth refresh, upload/download). Remaining failures are in advanced MSAL authentication scenarios (certificate fallback, silent refresh after migration).
 
 **Pre-deployment requirements:**
+
 1. ✅ Core pipeline functionality (process, monitor, execute)
 2. ✅ Email monitoring and batch processing
 3. ✅ Document download and upload orchestration

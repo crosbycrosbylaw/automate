@@ -69,7 +69,7 @@ def process(
     eserv().execute(make_email_record(body, **kwds))
 
 
-async def monitor(dotenv: str = None, lookback: int = 1):
+def monitor(dotenv: str = None, lookback: int = 1):
     """Monitor email inbox and process new messages.
 
     Args:
@@ -82,8 +82,12 @@ async def monitor(dotenv: str = None, lookback: int = 1):
         BatchResult with summary and per-email results.
 
     """
+    import asyncio
+
     dotenv_path.set(dotenv)
-    await eserv().monitor(num_days=lookback)
+    app = eserv()
+    object.__setattr__(app.config, 'monitor_num_days', lookback)
+    asyncio.run(app.monitor())
 
 
 def verify(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -9,7 +10,7 @@ from azure.core.credentials import TokenCredential
 from msal import ConfidentialClientApplication
 from rampy import make_factory
 
-from automate.eserv.errors.authentication import raise_from_auth_response
+from automate.eserv.errors.authentication import AuthError
 from automate.eserv.types.structs import TokenManager
 from setup_console import console
 
@@ -20,11 +21,20 @@ if TYPE_CHECKING:
 def _validate_token_data(
     data: object,
 ) -> dict[str, Any]:
+    if data is None:
+        raise AuthError({
+            'error': 'bad_response',
+            'error_description': 'received empty authentication response',
+        })
+
     if not isinstance(data, dict):
-        raise TypeError(f'Expected dict, got {type(data).__name__}')
+        raise AuthError({
+            'error': 'invalid_type',
+            'error_description': f'expected {dict}, recieved {type(data)}',
+        })
 
     if 'error' in data:
-        raise_from_auth_response(data)
+        raise AuthError(data)
 
     return data
 
@@ -36,12 +46,7 @@ def _parse_auth_response(result: dict[str, Any] | None) -> dict[str, Any] | None
         seconds = int(result.pop('expires_in', 3600))
         result['expires_at'] = datetime.now(UTC) + timedelta(seconds=seconds)
 
-        return result
-
-    result = result or {}
-    console.error(event='Authentication failed', **result)
-
-    return None
+    return result
 
 
 def _build_app_cred() -> dict[str, str]:
@@ -71,7 +76,7 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
 
     @property
     def tenant_id(self) -> str:
-        return self.credential.get('authority', '').rsplit('/', maxsplit=1)[-1]
+        return str(self.credential.get('authority', '')).rsplit('/', maxsplit=1)[-1]
 
     @property
     def scopes(self) -> list[str]:
@@ -96,18 +101,20 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
         except MissingVariableError:
             cred = self.credential.client_secret
 
+        auth = self.credential.properties.setdefault(
+            'authority',
+            'https://login.microsoftonline.com/common',
+        )
+
         client = self._client = ConfidentialClientApplication(
             client_id=self.credential.client_id,
             client_credential=cred,
-            authority=self.credential['authority'],
+            authority=auth,
         )
 
         return client
 
     def get_token(self, *_: ..., **__: ...) -> AccessToken: ...
-
-    def __post_init__(self) -> None:
-        self.credential.properties.setdefault('authority', 'https://login.microsoftonline.com/common')
 
     def _acquire_token_silent(self) -> dict[str, Any] | None:
         account = None if not (accounts := self.client.get_accounts()) else accounts[0]
@@ -140,19 +147,33 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
             RuntimeError: If token refresh fails
 
         """
-        data: dict[str, Any] | None = None
-
-        for method in [
+        funcs = [
             self._acquire_token_silent,
             self._acquire_token_by_refresh_token,
             self._acquire_token_for_client,
-        ]:
-            if data := method():
-                break
+        ]
 
-            console.warning(f'Failed to authenticate with: {method.__name__.strip("_")}')
+        errors: list[Exception | None] = [None for _ in range(3)]
 
-        return _validate_token_data(data)
+        for i, f in enumerate(funcs):
+            name = f.__name__.strip('_')
+            parsed = f()
+
+            try:
+                data = _validate_token_data(parsed)
+            except AuthError as err:
+                errors[i] = err
+            else:
+                return data
+
+            console.warning('Authentication failed', method=name)
+
+        console.error(
+            event='MSAL token refresh failed',
+            **{f.__name__.strip('_'): str(e) for f, e in zip(funcs, errors, strict=True) if e},
+        )
+
+        raise sys.exit(1)
 
 
 make_msal_manager = make_factory(MSALManager)

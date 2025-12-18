@@ -34,7 +34,7 @@ class EmailProcessor:
     def __post_init__(self) -> None:
         self.max_age = self.pipe.config.monitor_num_days
 
-    async def process_batch(self) -> BatchResult:
+    async def process_batch(self, max_records: int = -1) -> BatchResult:
         """Process all unprocessed emails from monitoring folder."""
         from automate.eserv.monitor.collect import collect_unprocessed_emails
         from automate.eserv.types import BatchResult

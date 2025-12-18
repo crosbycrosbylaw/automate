@@ -85,9 +85,9 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
 
     def __post_init__(self, dotenv_path: StrPath | None) -> None:
         console.info(
-            event='configuration loaded',
+            event='Loaded configuration',
             dotenv_path=dotenv_path,
-            service_dir=self.paths.service,
+            service_dir=self.paths.service.as_posix(),
             cache_ttl=self.index_max_age,
             smtp_server=self.smtp_server,
         )

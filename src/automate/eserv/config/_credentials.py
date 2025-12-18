@@ -79,11 +79,12 @@ class CredentialsConfig:
 
     def __new__(cls, path: Path) -> Self:
         if not hasattr(cls, '_instance'):
-            cls.path = path.resolve(strict=True)
+            resolved_path = path.resolve(strict=True)
             this = super().__new__(cls)
-            this.__init__(path)
+            object.__setattr__(this, 'path', resolved_path)
             object.__setattr__(this, '_lock', threading.Lock())
             object.__setattr__(this, '_mapping', {})
+            this.__init__(resolved_path)
 
             cls._instance = this
 

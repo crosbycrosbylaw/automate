@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
 import orjson
 from rampy.util import make_factory
+from setup_console import console
 
 from automate.eserv.monitor.result import process_pipeline_result
 from automate.eserv.types.results import ProcessedResult
-from setup_console import console
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from automate.eserv.types import EmailRecord, ErrorDict, ProcessedResultDict
 
 
 @dataclass
-class EmailState:
+class StateTracker:
     """Audit log for processed emails (UID-based)."""
 
     path: Path
@@ -31,27 +30,34 @@ class EmailState:
 
     def __post_init__(self) -> None:
         """Load email state from disk after initialization."""
-        self._load()
+        self.print = console.bind(entries=self._entries, path=self.path.as_posix())
+
+        if self.path.exists():
+            self._load()
 
     def _load(self) -> None:
         """Load from JSON, fresh start if missing."""
-        if not self.path.exists():
-            self._entries = {}
-            return
 
         try:
-            with self.path.open('rb') as f:
-                data: dict[str, ProcessedResultDict] = orjson.loads(f.read())
+            with self.path.open("rb") as f:
+                data: dict[str, ProcessedResultDict] = orjson.loads(f.read() or b"{}")
 
-            self._entries = {uid: process_pipeline_result(entry) for uid, entry in data.items()}
+            self._entries = {
+                uid: process_pipeline_result(entry) for uid, entry in data.items()
+            }
         except Exception:
-            console.exception('EmailState loading')
+            self.print.exception()
             self._entries = {}
+
+        else:
+            self.print.info(event="Loaded audit log")
 
     @overload
     def record(self, result: ProcessedResult, /) -> None: ...
     @overload
-    def record(self, record: EmailRecord, /, error: ErrorDict | None = None) -> None: ...
+    def record(
+        self, record: EmailRecord, /, error: ErrorDict | None = None
+    ) -> None: ...
     def record(
         self,
         arg: EmailRecord | ProcessedResult,
@@ -77,12 +83,14 @@ class EmailState:
 
     def _save(self) -> None:
         """Persist to JSON."""
-        data: dict[str, ProcessedResultDict] = {uid: entry.asdict() for uid, entry in self._entries.items()}
+        data: dict[str, ProcessedResultDict] = {
+            uid: entry.asdict() for uid, entry in self._entries.items()
+        }
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        with self.path.open('wb') as f:
+        with self.path.open("wb") as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
 
 
-get_state_tracker = make_factory(EmailState)
+get_state_tracker = make_factory(StateTracker)

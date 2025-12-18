@@ -86,7 +86,7 @@ class TestPipelineInit:
         with mock_deps():
             pipeline = Pipeline(dotenv_path=mock_deps.fs['.env.test'])
 
-        mock_deps.get_error_tracker.assert_called_once_with(mock_deps.fs['service']['state.json'])
+        mock_deps.get_state_tracker.assert_called_once_with(mock_deps.fs['service']['state.json'])
 
         assert pipeline.state.path == mock_deps.configure.get('paths.state')
         assert pipeline.state is mock_deps.get_state_tracker.return_value
@@ -203,7 +203,7 @@ class TestPipelineProcess:
 
             # Process should return error result
             result = pipeline.process(sample_email_record)
-            mock_deps.get_error_tracker.get('track').assert_called_once()
+            pipeline.tracker.track.assert_called_once_with(sample_email_record.uid)
             assert result.status == status.ERROR
 
     def test_download_failure(
@@ -224,7 +224,7 @@ class TestPipelineProcess:
             result = pipeline.process(sample_email_record)
 
             # Verify error tracking was initiated
-            mock_deps.get_error_tracker.return_value.track.assert_called_once()
+            pipeline.tracker.track.assert_called_once_with(sample_email_record.uid)
             # Verify ERROR status returned
             assert result.status == status.ERROR
 
@@ -257,7 +257,7 @@ class TestPipelineProcess:
             result = pipeline.process(sample_email_record)
 
             # Verify error tracking was initiated
-            mock_deps.get_error_tracker.return_value.track.assert_called_once()
+            pipeline.tracker.track.assert_called_once_with(sample_email_record.uid)
             # Verify ERROR status returned
             assert result.status == status.ERROR
 
@@ -401,7 +401,7 @@ class TestPipelineProcess:
             assert result.status == status.MANUAL_REVIEW
 
             # Verify error tracking was initiated
-            mock_deps.get_error_tracker.return_value.track.assert_called_once()
+            pipeline.tracker.track.assert_called_once_with(sample_email_record.uid)
 
     def test_upload_error_status(
         self,
@@ -436,7 +436,7 @@ class TestPipelineProcess:
                 pipeline.process(sample_email_record)
 
             # Verify error tracking was initiated
-            mock_deps.get_error_tracker.return_value.track.assert_called_once()
+            pipeline.tracker.track.assert_called_once_with(sample_email_record.uid)
 
 
 class TestPipelineMonitor:

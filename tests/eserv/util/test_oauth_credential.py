@@ -407,20 +407,26 @@ class TestDropboxManagerInitialization:
         dropbox_credential: DropboxCredential,
     ) -> None:
         """Test client property creates Dropbox client."""
-        with patch('automate.eserv.util.dbx_manager.Dropbox') as MockDropbox:
-            mock_client = Mock()
-            MockDropbox.return_value = mock_client
+        mock_client = Mock()
 
-            # Clear cached manager to force new client creation
-            if hasattr(dropbox_credential, '_manager'):
-                del dropbox_credential._manager
-            if 'manager' in dropbox_credential.__dict__:
-                del dropbox_credential.__dict__['manager']
+        # Clear cached manager AND its client BEFORE patching
+        if 'manager' in dropbox_credential.__dict__:
+            del dropbox_credential.__dict__['manager']
 
-            client = dropbox_credential.manager.client
+        with patch('dropbox.Dropbox', return_value=mock_client) as MockDropbox:
+            # Access manager to create it INSIDE patch, then access client
+            manager = dropbox_credential.manager
+            # Ensure _client is None so it initializes inside the patch
+            manager._client = None
+            client = manager.client
 
             assert client is mock_client
-            MockDropbox.assert_called_once()
+            MockDropbox.assert_called_once_with(
+                oauth2_access_token=dropbox_credential.access_token,
+                oauth2_refresh_token=dropbox_credential.refresh_token,
+                app_key=dropbox_credential.client_id,
+                app_secret=dropbox_credential.client_secret,
+            )
 
 
 class TestDropboxManagerRefresh:
@@ -438,11 +444,14 @@ class TestDropboxManagerRefresh:
         mock_client._oauth2_access_token_expiration = new_expiration
         mock_client._scope = dropbox_credential.scope.split()
 
-        with patch('automate.eserv.util.dbx_manager.Dropbox', return_value=mock_client):
-            # Clear cached manager
-            if 'manager' in dropbox_credential.__dict__:
-                del dropbox_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in dropbox_credential.__dict__:
+            del dropbox_credential.__dict__['manager']
 
+        with patch('dropbox.Dropbox', return_value=mock_client):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = dropbox_credential.manager
+            manager._client = None
             new_cred = dropbox_credential.refresh()
 
             # Verify token refresh was called
@@ -463,11 +472,14 @@ class TestDropboxManagerRefresh:
         mock_client._oauth2_access_token_expiration = datetime.now(UTC) + timedelta(hours=4)
         mock_client._scope = []
 
-        with patch('automate.eserv.util.dbx_manager.Dropbox', return_value=mock_client):
-            # Clear cached manager
-            if 'manager' in dropbox_credential.__dict__:
-                del dropbox_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in dropbox_credential.__dict__:
+            del dropbox_credential.__dict__['manager']
 
+        with patch('dropbox.Dropbox', return_value=mock_client):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = dropbox_credential.manager
+            manager._client = None
             new_cred = dropbox_credential.refresh()
 
             assert new_cred is not dropbox_credential
@@ -481,11 +493,14 @@ class TestDropboxManagerRefresh:
         mock_client = Mock()
         mock_client.check_and_refresh_access_token.side_effect = Exception('API Error')
 
-        with patch('automate.eserv.util.dbx_manager.Dropbox', return_value=mock_client):
-            # Clear cached manager
-            if 'manager' in dropbox_credential.__dict__:
-                del dropbox_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in dropbox_credential.__dict__:
+            del dropbox_credential.__dict__['manager']
 
+        with patch('dropbox.Dropbox', return_value=mock_client):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = dropbox_credential.manager
+            manager._client = None
             with pytest.raises(Exception, match='API Error'):
                 dropbox_credential.refresh()
 
@@ -523,18 +538,27 @@ class TestMSALManagerInitialization:
         msal_credential: MSALCredential,
     ) -> None:
         """Test client property creates ConfidentialClientApplication."""
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication') as MockMSAL:
-            mock_app = Mock()
-            MockMSAL.return_value = mock_app
+        mock_app = Mock()
 
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
-            client = msal_credential.manager.client
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app) as MockMSAL,
+        ):
+            # Access manager and reset its _client INSIDE patch
+            manager = msal_credential.manager
+            manager._client = None
+            client = manager.client
 
             assert client is mock_app
-            MockMSAL.assert_called_once()
+            MockMSAL.assert_called_once_with(
+                client_id=msal_credential.client_id,
+                client_credential=msal_credential.client_secret,
+                authority=msal_credential['authority'],
+            )
 
     def test_scopes_property_filters_reserved_scopes(
         self,
@@ -593,11 +617,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_silent.return_value = token_response
         mock_app.get_accounts.return_value = [{'username': 'test@example.com'}]
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             new_cred = msal_credential.refresh()
 
             # Verify silent acquisition was attempted
@@ -621,11 +651,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_by_refresh_token.return_value = refresh_response
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             new_cred = msal_credential.refresh()
 
             # Verify fallback to refresh token
@@ -650,11 +686,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_for_client.return_value = client_response
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             new_cred = msal_credential.refresh()
 
             # Verify all methods tried in order
@@ -675,11 +717,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_for_client.return_value = None
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             with pytest.raises(TypeError, match='Expected dict'):
                 msal_credential.refresh()
 
@@ -687,7 +735,7 @@ class TestMSALManagerTokenRefresh:
         self,
         msal_credential: MSALCredential,
     ) -> None:
-        """Test refresh() raises AuthError on error response."""
+        """Test refresh() logs error and raises TypeError when all methods return errors."""
         error_response = {
             'error': 'invalid_grant',
             'error_description': 'Token expired or revoked',
@@ -695,14 +743,24 @@ class TestMSALManagerTokenRefresh:
 
         mock_app = Mock()
         mock_app.acquire_token_silent.return_value = error_response
+        mock_app.acquire_token_by_refresh_token.return_value = error_response
+        mock_app.acquire_token_for_client.return_value = error_response
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
-            with pytest.raises(AuthError):
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
+            # When all methods return errors, _parse_auth_response logs them and returns None
+            # This causes _validate_token_data to raise TypeError
+            with pytest.raises(TypeError, match='Expected dict'):
                 msal_credential.refresh()
 
     def test_refresh_normalizes_expires_in_to_expires_at(
@@ -720,11 +778,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_silent.return_value = token_response
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             new_cred = msal_credential.refresh()
             after = datetime.now(UTC)
 
@@ -748,11 +812,17 @@ class TestMSALManagerTokenRefresh:
         mock_app.acquire_token_silent.return_value = token_response
         mock_app.get_accounts.return_value = []
 
-        with patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app):
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
 
+        with (
+            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
+        ):
+            # Access manager and reset its _client INSIDE the patch context
+            manager = msal_credential.manager
+            manager._client = None
             new_cred = msal_credential.refresh()
 
             assert new_cred is not msal_credential
@@ -771,8 +841,12 @@ class TestMSALManagerCertificateAuth:
         cert_thumbprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33'
         mock_app = Mock()
 
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
+
         with (
-            patch('automate.eserv.util.msal_manager.get_config') as mock_config,
+            patch('automate.eserv.config.get_config') as mock_config,
             patch(
                 'automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app
             ) as MockMSAL,
@@ -781,10 +855,6 @@ class TestMSALManagerCertificateAuth:
                 certificate_thumbprint=cert_thumbprint,
                 paths=Mock(private_key=mock_deps.fs['cert']['private.key']),
             )
-
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
 
             client = msal_credential.manager.client
 
@@ -800,21 +870,21 @@ class TestMSALManagerCertificateAuth:
         msal_credential: MSALCredential,
     ) -> None:
         """Test client initialization falls back to client secret."""
+        from automate.eserv.errors.types import MissingVariableError
+
         mock_app = Mock()
 
+        # Clear cached manager BEFORE patching
+        if 'manager' in msal_credential.__dict__:
+            del msal_credential.__dict__['manager']
+
         with (
-            patch('automate.eserv.util.msal_manager.get_config') as mock_config,
+            patch('automate.eserv.config.get_config') as mock_config,
             patch(
                 'automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app
             ) as MockMSAL,
         ):
-            from automate.eserv.errors.types import MissingVariableError
-
             mock_config.side_effect = MissingVariableError('CERT_THUMBPRINT')
-
-            # Clear cached manager
-            if 'manager' in msal_credential.__dict__:
-                del msal_credential.__dict__['manager']
 
             client = msal_credential.manager.client
 
