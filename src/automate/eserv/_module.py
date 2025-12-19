@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 __all__ = [
+    'DropboxCredential',
+    'MSALCredential',
     'get_config',
     'get_creds',
     'get_error_tracker',
     'get_paths',
     'get_state_tracker',
-    'new_dropbox_credential',
-    'new_msal_credential',
     'stage',
     'status',
 ]
@@ -16,8 +16,6 @@ __all__ = [
 from functools import partial
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
-
-from rampy import make_factory
 
 from automate.eserv.types.enums import PipelineStage, UploadStatus
 from automate.eserv.util.dbx_manager import DropboxManager
@@ -59,8 +57,6 @@ def get_error_tracker() -> ErrorTracker:
 DropboxCredential = partial(OAuthCredential[DropboxManager], factory=DropboxManager, type='dropbox')
 MSALCredential = partial(OAuthCredential[MSALManager], factory=MSALManager, type='msal')
 
-new_dropbox_credential = make_factory(DropboxCredential)
-new_msal_credential = make_factory(MSALCredential)
 
 stage = PipelineStage
 status = UploadStatus

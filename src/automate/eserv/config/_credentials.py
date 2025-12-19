@@ -38,14 +38,14 @@ def parse_credential_json(
     json: CredentialsJSON | dict[str, Any],
 ) -> OAuthCredential[Any]:
     """Parse fields from token data."""
-    from automate.eserv import new_dropbox_credential, new_msal_credential
+    from automate.eserv import DropboxCredential, MSALCredential
 
     data = _nest_properties(json)
     match json['type']:
         case 'dropbox':
-            return new_dropbox_credential(**data)
+            return DropboxCredential(**data)
         case 'msal':
-            return new_msal_credential(**data)
+            return MSALCredential(**data)
         case _:
             return OAuthCredential(**data)
 
