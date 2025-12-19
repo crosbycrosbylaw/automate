@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
@@ -15,6 +14,8 @@ from automate.eserv.types.structs import TokenManager
 from setup_console import console
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from azure.core.credentials import AccessToken
 
 
@@ -50,10 +51,10 @@ def _parse_auth_response(result: dict[str, Any] | None) -> dict[str, Any] | None
 
 
 def _build_app_cred() -> dict[str, str]:
-    from automate.eserv.config import get_config
+    from automate.eserv.config import configure
     from automate.eserv.errors.types import MissingVariableError
 
-    config = get_config()
+    config = configure()
 
     if raw := config.certificate_thumbprint:
         thumbprint = ''.join(raw.split(':'))
@@ -92,8 +93,12 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
     _RESERVED_SCOPES: ClassVar[set[str]] = {'offline_access', 'openid', 'profile'}
 
     @property
-    def tenant_id(self) -> str:
-        return str(self.credential.get('authority', '')).rsplit('/', maxsplit=1)[-1]
+    def authority(self) -> str:
+        auth = self.credential.properties.setdefault(
+            'authority',
+            f'https://login.microsoftonline.com/{self.credential.get("tenant_id", "common")}',
+        )
+        return str(auth)
 
     @property
     def scopes(self) -> list[str]:
@@ -118,18 +123,13 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
         except MissingVariableError:
             cred = self.credential.client_secret
 
-        auth = self.credential.properties.setdefault(
-            'authority',
-            'https://login.microsoftonline.com/common',
-        )
-
-        client = self._client = ConfidentialClientApplication(
+        self._client = ConfidentialClientApplication(
             client_id=self.credential.client_id,
             client_credential=cred,
-            authority=auth,
+            authority=self.authority,
         )
 
-        return client
+        return self._client
 
     def get_token(self, *_: ..., **__: ...) -> AccessToken: ...
 

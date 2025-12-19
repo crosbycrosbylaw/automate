@@ -115,10 +115,10 @@ def _extract(soup: BeautifulSoup, download_info: DownloadInfo) -> UploadInfo | I
 
 
 def _upload(config: Config, context: dict[str, Any]) -> IntermediaryResult:
-    log = console.bind(event='Upload documents')
+    log = console.bind()
 
     documents: list[Path] = [*context['store_path'].glob('*.pdf')]
-    log.info(documents=[f.name for f in documents])
+    log.info('Found documents', documents=[f.name for f in documents])
 
     result = _confirm(upload_documents)(
         documents=documents,
@@ -128,11 +128,12 @@ def _upload(config: Config, context: dict[str, Any]) -> IntermediaryResult:
     )
 
     log = log.bind(status=result.status.value)
-    log.info(uploaded_count=len(result.uploaded_files))
+    log.info('Upload complete', uploaded_count=len(result.uploaded_files))
 
     match result.status:
         case status.SUCCESS:
             log.info(
+                event='Upload successful',
                 folder=result.folder_path,
                 files=len(result.uploaded_files),
             )

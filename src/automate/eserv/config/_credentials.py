@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeGuard, no_type_check, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeGuard, overload
 
 import orjson
 
@@ -50,13 +50,8 @@ def parse_credential_json(
             return OAuthCredential(**data)
 
 
-@no_type_check
-def _credential_map_factory() -> CredentialMap:
-    return {}
-
-
 def _path_factory():
-    from automate.eserv.config import get_paths
+    from automate.eserv._module import get_paths
 
     return get_paths().credentials
 
@@ -69,7 +64,7 @@ class CredentialsConfig:
 
     path: Path = field(doc='path to the credentials JSON file', default_factory=_path_factory)
 
-    _verbose: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
+    _verbose: ModeConsole = field(init=False, repr=False)
 
     @property
     def msal(self) -> MSALCredential:
@@ -85,8 +80,8 @@ class CredentialsConfig:
             cred = mapping['dropbox']
             return cred if not cred.expired else self._refresh(cred)
 
-    _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
-    _mapping: CredentialMap = field(init=False, repr=False, default_factory=_credential_map_factory)
+    _lock: Lock = field(init=False, repr=False)
+    _mapping: CredentialMap = field(init=False, repr=False)
 
     def __new__(cls, path: Path) -> Self:
         self = getattr(cls, '_instance', cls._setup(path))
@@ -102,6 +97,10 @@ class CredentialsConfig:
         path = path.resolve(strict=True)
 
         self = super().__new__(cls)
+        # Initialize mutable state BEFORE calling __init__ to prevent re-initialization
+        object.__setattr__(self, '_lock', threading.Lock())
+        object.__setattr__(self, '_mapping', {})
+        object.__setattr__(self, '_verbose', mode_console(mode.VERBOSE)())
         self.__init__(path)
 
         cls._instance = self
@@ -166,8 +165,10 @@ class CredentialsConfig:
 
     @contextmanager
     def _map(self) -> Generator[CredentialMap]:
-        with self._lock:
+        try:
             yield self._mapping
+        finally:
+            pass
 
 
 def get_credentials() -> CredentialsConfig:

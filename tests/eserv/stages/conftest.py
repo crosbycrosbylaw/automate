@@ -15,7 +15,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import field
 from typing import TYPE_CHECKING, Any, Self
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from pytest_fixture_classes import fixture_class
@@ -105,7 +105,13 @@ class UploadDocumentSubtestFixture(test.subtestfix):
             with (
                 patch('automate.eserv.upload.IndexCache', Mock(return_value=self.mock_cache)),
                 patch('automate.eserv.upload.FolderMatcher', Mock(return_value=self.mock_matcher)),
-                patch('automate.eserv.upload.Notifier', Mock(return_value=self.mock_notifier)),
+                patch(
+                    'automate.eserv.upload.Notifier',
+                    MagicMock(
+                        return_value=self.mock_notifier,
+                        spec=['notify_upload_success', 'notify_manual_review'],
+                    ),
+                ),
             ):
                 yield
         finally:

@@ -57,10 +57,10 @@ def upload_documents(
         Upload result with status and details.
 
     """
-    console = setup_console.console.bind(event='Upload documents', case_name=case_name, lead_name=lead_name)
+    console = setup_console.console.bind(case_name=case_name, lead_name=lead_name)
 
     if not documents:
-        console.warning(cause='There are no documents to upload.')
+        console.warning('Upload documents', cause='There are no documents to upload.')
         return IntermediaryResult(status=status.NO_WORK)
 
     dbx = config.creds.dropbox.manager

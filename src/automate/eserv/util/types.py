@@ -18,12 +18,12 @@ __all__ = [
 from dataclasses import dataclass
 
 from .dbx_manager import DropboxManager
-from .email_state import StateTracker
 from .error_tracker import ErrorTracker
 from .index_cache import IndexCache
 from .msal_manager import MSALManager
 from .notifications import Notifier
 from .oauth_credential import OAuthCredential
+from .state_tracker import StateTracker
 from .target_finder import CaseMatch, FolderMatcher, PartyExtractor
 
 type MSALCredential = OAuthCredential[MSALManager]

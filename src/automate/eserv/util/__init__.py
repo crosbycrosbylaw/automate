@@ -17,9 +17,9 @@ __all__ = [
 
 from .doc_store import get_doc_store
 from .email_record import make_email_record
-from .email_state import StateTracker
 from .error_tracker import ErrorTracker, error_tracking
 from .index_cache import IndexCache
 from .notifications import Notifier
 from .oauth_credential import OAuthCredential
+from .state_tracker import StateTracker
 from .target_finder import FolderMatcher

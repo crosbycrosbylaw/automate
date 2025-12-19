@@ -26,8 +26,8 @@ class StateTracker:
 
     path: Path
 
-    _entries: dict[str, ProcessedResult] = field(default_factory=dict, init=False)
-    _print: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
+    _entries: dict[str, ProcessedResult] = field(init=False, repr=False)
+    _print: ModeConsole = field(init=False, repr=False)
 
     @property
     def processed(self) -> set[str]:
@@ -40,6 +40,9 @@ class StateTracker:
     @classmethod
     def _setup(cls, path: Path) -> Self:
         self = super().__new__(cls)
+        # Initialize mutable state BEFORE calling __init__ to prevent re-initialization
+        object.__setattr__(self, '_entries', {})
+        object.__setattr__(self, '_print', mode_console(mode.VERBOSE)())
         self.__init__(path)
         cls._instance = self
 

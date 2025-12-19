@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def _path_factory():
-    from automate.eserv.config import get_paths
+    from automate.eserv._module import get_paths
 
     return get_paths().errors
 
@@ -54,8 +54,8 @@ class ErrorTracker:
     path: Path = field(default_factory=_path_factory)
     uid: str | None = field(init=False, default=None)
 
-    _print: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
-    _prev_map: dict[str | None, int] = field(init=False, default_factory=dict)
+    _print: ModeConsole = field(init=False, repr=False)
+    _prev_map: dict[str | None, int] = field(init=False, repr=False)
 
     @classmethod
     def set(cls, *, uid: str | None = None, path: Path | None = None) -> None:
@@ -88,7 +88,7 @@ class ErrorTracker:
             return self._errors[index]
         return None
 
-    _errors: list[ErrorDict] = field(default_factory=list, init=False)
+    _errors: list[ErrorDict] = field(init=False, repr=False)
 
     def __new__(cls, path: Path) -> Self:
         return getattr(cls, '_instance', cls._setup(path))
@@ -97,6 +97,10 @@ class ErrorTracker:
     def _setup(cls, path: Path) -> Self:
         """Load existing error log from disk."""
         self = super().__new__(cls)
+        # Initialize mutable state BEFORE calling __init__ to prevent re-initialization
+        object.__setattr__(self, '_print', mode_console(mode.VERBOSE)())
+        object.__setattr__(self, '_prev_map', {})
+        object.__setattr__(self, '_errors', [])
         self.__init__(path)
         cls._instance = self
 

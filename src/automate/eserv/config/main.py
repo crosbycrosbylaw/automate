@@ -5,8 +5,6 @@ __all__ = ['Config']
 from dataclasses import InitVar, dataclass, field, fields
 from typing import TYPE_CHECKING, Self, no_type_check
 
-from rampy import make_factory
-
 from automate.eserv.config.utils import email_variable, env_var, integer_variable
 from setup_console import mode, mode_console
 
@@ -66,7 +64,7 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
 
     """
 
-    dotenv_path: InitVar[StrPath | None] = None
+    dotenv_path: InitVar[StrPath | None] = field(default=None)
 
     paths: PathsConfig = field(init=False)
     creds: CredentialsConfig = field(init=False)
@@ -82,7 +80,7 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
 
         return self
 
-    def __new__(cls, dotenv_path: StrPath | None) -> Self:
+    def __new__(cls, dotenv_path: StrPath | None = None) -> Config:
         return getattr(cls, '_instance', cls._setup(dotenv_path))
 
     def __post_init__(self, dotenv_path: ...) -> None:
@@ -118,8 +116,4 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
         }
 
 
-configure = make_factory(Config)
-
-
-def get_config(dotenv_path: StrPath | None = None) -> Config:
-    return Config(dotenv_path=dotenv_path)
+configure = Config

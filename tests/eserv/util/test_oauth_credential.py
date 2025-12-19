@@ -601,16 +601,17 @@ class TestMSALManagerInitialization:
 
         assert scopes == ['.default']
 
-    def test_tenant_id_property_extracts_from_authority(
+    def test_authority_property_extracts_from_tenant_id(
         self,
         msal_credential: MSALCredential,
     ) -> None:
         """Test tenant_id property extracts tenant from authority URL."""
-        msal_credential.properties['authority'] = 'https://login.microsoftonline.com/tenant-id-123'
+        msal_credential.properties.pop('authority', None)
+        msal_credential.properties['tenant_id'] = 'tenant-id-123'
 
-        tenant_id = msal_credential.manager.tenant_id
+        authority = msal_credential.manager.authority
 
-        assert tenant_id == 'tenant-id-123'
+        assert authority.endswith('/tenant-id-123')
 
 
 class TestMSALManagerTokenRefresh:
@@ -893,7 +894,7 @@ class TestMSALManagerCertificateAuth:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.config.get_config') as mock_config,
+            patch('automate.eserv.config.configure') as mock_config,
             patch(
                 'automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app
             ) as MockMSAL,
@@ -926,7 +927,7 @@ class TestMSALManagerCertificateAuth:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.config.get_config') as mock_config,
+            patch('automate.eserv.config.configure') as mock_config,
             patch(
                 'automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app
             ) as MockMSAL,
