@@ -66,6 +66,7 @@ if TYPE_CHECKING:
         'ErrorDict',
         'MSALCredential',
         'MonitoringConfig',
+        'PartialCredentialMap',
         'ProcessStatus',
         'ProcessedResultDict',
         'SMTPConfig',

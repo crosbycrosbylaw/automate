@@ -50,14 +50,14 @@ def _mock_expiration() -> str:
 
 class PartialPatches(TypedDict, total=False):
     configure: Mocked[Config]
-    get_state_tracker: Mocked[StateTracker]
-    get_error_tracker: Mocked[ErrorTracker]
+    StateTracker: Mocked[StateTracker]
+    ErrorTracker: Mocked[ErrorTracker]
 
 
 class PatchedDependencies(TypedDict):
     configure: Mocked[Config]
-    get_state_tracker: Mocked[StateTracker]
-    get_error_tracker: Mocked[ErrorTracker]
+    StateTracker: Mocked[StateTracker]
+    ErrorTracker: Mocked[ErrorTracker]
 
 
 @fixture_class(name='mock_deps')
@@ -129,8 +129,8 @@ class MockDependencies:
     _creds: Mocked[CredentialsConfig] = field(init=False)
     _paths: Mocked[PathsConfig] = field(init=False)
     _configure: Mocked[Config] = field(init=False)
-    _get_state_tracker: Mocked[StateTracker] = field(init=False)
-    _get_error_tracker: Mocked[ErrorTracker] = field(init=False)
+    _StateTracker: Mocked[StateTracker] = field(init=False)
+    _ErrorTracker: Mocked[ErrorTracker] = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize mock file structure and environment."""
@@ -231,22 +231,22 @@ class MockDependencies:
         return self._configure
 
     @property
-    def get_state_tracker(self) -> Mocked[StateTracker]:
+    def StateTracker(self) -> Mocked[StateTracker]:
         """Return the StateTracker factory (callable mock that returns the state tracker instance)."""
-        if not hasattr(self, '_get_state_tracker'):
+        if not hasattr(self, '_StateTracker'):
             namespace = {
                 'path': self.fs['service']['state.json'],
                 'is_processed.return_value': False,
                 'processed': set[str](),
             }
-            object.__setattr__(self, '_get_state_tracker', mock(StateTracker, namespace))
+            object.__setattr__(self, '_StateTracker', mock(StateTracker, namespace))
 
-        return self._get_state_tracker
+        return self._StateTracker
 
     @property
-    def get_error_tracker(self) -> Mocked[ErrorTracker]:
+    def ErrorTracker(self) -> Mocked[ErrorTracker]:
         """Return the ErrorTracker factory (callable mock that returns the error tracker instance)."""
-        if not hasattr(self, '_get_error_tracker'):
+        if not hasattr(self, '_ErrorTracker'):
             errors: list[ErrorDict] = []
 
             def mock_error(event: str | None = None, **kwds: Any) -> IntermediaryResult:
@@ -293,7 +293,7 @@ class MockDependencies:
                 def mock_prev() -> ErrorDict | None:
                     return next((e for e in reversed(errors) if e.get('uid') == uid), None)
 
-                subtracker = self.get_error_tracker.new(**{
+                subtracker = self.ErrorTracker.new(**{
                     'path': self.fs['service']['errors.json'],
                     'uid': uid,
                     'error.side_effect': partial(mock_error, uid=uid),
@@ -313,9 +313,9 @@ class MockDependencies:
                 'clear_old_errors.return_value': None,
                 'track.side_effect': mock_track,
             }
-            object.__setattr__(self, '_get_error_tracker', mock(ErrorTracker, namespace))
+            object.__setattr__(self, '_ErrorTracker', mock(ErrorTracker, namespace))
 
-        return self._get_error_tracker
+        return self._ErrorTracker
 
     @contextmanager
     def __call__(
@@ -325,8 +325,8 @@ class MockDependencies:
     ) -> Generator[PatchedDependencies]:
         patches: PatchedDependencies = {
             'configure': kwds.pop('configure', self.configure),
-            'get_state_tracker': kwds.pop('get_state_tracker', self.get_state_tracker),
-            'get_error_tracker': kwds.pop('get_error_tracker', self.get_error_tracker),
+            'StateTracker': kwds.pop('StateTracker', self.StateTracker),
+            'ErrorTracker': kwds.pop('ErrorTracker', self.ErrorTracker),
         }
         with patch.multiple(target=target, **patches):
             yield patches

@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Final
 from unittest.mock import patch
 
-import pytest
-
 from automate.eserv.config.main import configure
 
 if TYPE_CHECKING:

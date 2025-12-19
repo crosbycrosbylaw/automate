@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 __all__ = [
+    'dprinter',
     'email_variable',
     'ensure_fields',
     'env_var',
@@ -10,6 +11,7 @@ __all__ = [
     'hint',
     'integer_variable',
     'path_variable',
+    'vprinter',
 ]
 
 import dataclasses
@@ -18,8 +20,9 @@ import re
 from dataclasses import fields
 from typing import TYPE_CHECKING, Final, Literal, NewType, overload
 
-from rampy import make_factory
+from rampy import make_factory, mode
 
+import setup_console
 from automate.eserv.errors.types import InvalidFormatError, MissingVariableError
 
 if TYPE_CHECKING:
@@ -135,3 +138,8 @@ def ensure_fields[T: DataclassInstance](obj: T) -> T:
             object.__setattr__(obj, f.name, f.default_factory())
 
     return obj
+
+
+vprinter = setup_console.dyn_console(mode.VERBOSE)
+dprinter = setup_console.dyn_console(mode.DEBUG)
+type ModeConsole = setup_console.DynConsole[mode]

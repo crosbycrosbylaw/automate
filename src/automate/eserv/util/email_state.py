@@ -1,63 +1,78 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, ClassVar, Final, Self, overload
 
 import orjson
-from rampy.util import make_factory
-from setup_console import console
 
 from automate.eserv.monitor.result import process_pipeline_result
 from automate.eserv.types.results import ProcessedResult
+from setup_console import mode, mode_console
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from automate.eserv.types import EmailRecord, ErrorDict, ProcessedResultDict
+    from setup_console import ModeConsole
+
+_MIN_CONTENT_LENGTH: Final[int] = len(b'{}')
 
 
 @dataclass
 class StateTracker:
     """Audit log for processed emails (UID-based)."""
 
+    _instance: ClassVar[Self]
+
     path: Path
 
     _entries: dict[str, ProcessedResult] = field(default_factory=dict, init=False)
+    _print: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
 
     @property
     def processed(self) -> set[str]:
         """Get the set of processed email UIDs."""
         return {*self._entries.keys()}
 
-    def __post_init__(self) -> None:
-        """Load email state from disk after initialization."""
-        self.print = console.bind(entries=self._entries, path=self.path.as_posix())
+    def __new__(cls, path: Path) -> Self:
+        return getattr(cls, '_instance', cls._setup(path))
 
-        if self.path.exists():
-            self._load()
+    @classmethod
+    def _setup(cls, path: Path) -> Self:
+        self = super().__new__(cls)
+        self.__init__(path)
+        cls._instance = self
 
-    def _load(self) -> None:
-        """Load from JSON, fresh start if missing."""
+        console = self._print.unwrap().bind(path=str(self.path))
 
         try:
-            with self.path.open("rb") as f:
-                data: dict[str, ProcessedResultDict] = orjson.loads(f.read() or b"{}")
+            content = self.path.read_bytes()
 
-            self._entries = {
-                uid: process_pipeline_result(entry) for uid, entry in data.items()
-            }
-        except Exception:
-            self.print.exception()
-            self._entries = {}
+            if len(content) >= _MIN_CONTENT_LENGTH:
+                data: dict[str, ProcessedResultDict] = orjson.loads(content)
+            else:
+                data = {}
+
+            for uid, entry in data.items():
+                self._entries[uid] = process_pipeline_result(entry)
+
+        except orjson.JSONDecodeError:
+            console.warning('Failed to parse audit log')
+
+        except TypeError, ValueError, FileNotFoundError:
+            console.exception(cls._setup.__qualname__)
 
         else:
-            self.print.info(event="Loaded audit log")
+            if entries := self._entries:
+                self._print.info('Parsed result entries', count=len(entries))
+
+        console.info(event='Loaded audit log')
+        return self
 
     @overload
     def record(self, result: ProcessedResult, /) -> None: ...
     @overload
-    def record(
-        self, record: EmailRecord, /, error: ErrorDict | None = None
-    ) -> None: ...
+    def record(self, record: EmailRecord, /, error: ErrorDict | None = None) -> None: ...
     def record(
         self,
         arg: EmailRecord | ProcessedResult,
@@ -83,14 +98,9 @@ class StateTracker:
 
     def _save(self) -> None:
         """Persist to JSON."""
-        data: dict[str, ProcessedResultDict] = {
-            uid: entry.asdict() for uid, entry in self._entries.items()
-        }
+        data: dict[str, ProcessedResultDict] = {uid: entry.asdict() for uid, entry in self._entries.items()}
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        with self.path.open("wb") as f:
+        with self.path.open('wb') as f:
             f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-
-
-get_state_tracker = make_factory(StateTracker)

@@ -103,9 +103,9 @@ class UploadDocumentSubtestFixture(test.subtestfix):
     def context(self) -> Generator[Any]:
         try:
             with (
-                patch('automate.eserv.upload.get_dbx_index_cache', Mock(return_value=self.mock_cache)),
-                patch('automate.eserv.upload.get_dbx_folder_matcher', Mock(return_value=self.mock_matcher)),
-                patch('automate.eserv.upload.get_notifier', Mock(return_value=self.mock_notifier)),
+                patch('automate.eserv.upload.IndexCache', Mock(return_value=self.mock_cache)),
+                patch('automate.eserv.upload.FolderMatcher', Mock(return_value=self.mock_matcher)),
+                patch('automate.eserv.upload.Notifier', Mock(return_value=self.mock_notifier)),
             ):
                 yield
         finally:

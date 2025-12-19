@@ -14,12 +14,11 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, NoReturn, Unpack, overload
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn, Self, Unpack, overload
 
 import orjson
-from rampy.util import make_factory
 
-from setup_console import console
+from setup_console import mode, mode_console
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -29,6 +28,13 @@ if TYPE_CHECKING:
     from automate.eserv.types import ErrorDict
     from automate.eserv.types.enums import PipelineStage
     from automate.eserv.types.results import IntermediaryResult
+    from setup_console import *
+
+
+def _path_factory():
+    from automate.eserv.config import get_paths
+
+    return get_paths().errors
 
 
 @dataclass
@@ -43,65 +49,86 @@ class ErrorTracker:
 
     """
 
-    path: Path
-    uid: str | None = field(default=None)
+    _instance: ClassVar[Self]
 
+    path: Path = field(default_factory=_path_factory)
+    uid: str | None = field(init=False, default=None)
+
+    _print: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
+    _prev_map: dict[str | None, int] = field(init=False, default_factory=dict)
+
+    @classmethod
+    def set(cls, *, uid: str | None = None, path: Path | None = None) -> None:
+        if path is not None or not hasattr(cls, '_instance'):
+            cls._setup(path or cls.get_path() or _path_factory())
+
+        cls._instance.uid = uid
+
+    @classmethod
+    def get(cls) -> ErrorTracker:
+        return cls._instance
+
+    @classmethod
     @contextmanager
-    def track(self, uid: str) -> Generator[ErrorTracker]:
-        """Context manager to temporarily track errors for a specific email.
+    def track(cls, uid: str, *, path: Path | None = None) -> Generator[ErrorTracker]:
+        cls.set(uid=uid, path=path)
+        try:
+            yield cls.get()
+        finally:
+            cls.set(uid=None)
 
-        Args:
-            uid: Identifier for the email record to track.
-
-        Yields:
-            Self: The ErrorTracker instance with updated uid.
-
-        """
-        yield ErrorTracker(self.path, uid=uid)
+    @classmethod
+    def get_path(cls) -> Path | None:
+        return getattr(getattr(cls, '_instance', None), 'path', None)
 
     @property
     def prev_error(self) -> ErrorDict | None:
         """Get the most recent error logged for the current UID."""
-        for error in reversed(self._errors):
-            if error.get('uid') == self.uid:
-                return error
+        if index := self._prev_map.get(self.uid):
+            return self._errors[index]
         return None
 
     _errors: list[ErrorDict] = field(default_factory=list, init=False)
 
-    def __post_init__(self) -> None:
-        """Load existing error log from disk."""
-        self._load_errors()
+    def __new__(cls, path: Path) -> Self:
+        return getattr(cls, '_instance', cls._setup(path))
 
-    def _load_errors(self) -> None:
-        """Load error log from JSON path, creating if missing."""
-        cons = console.bind(path=self.path.as_posix())
+    @classmethod
+    def _setup(cls, path: Path) -> Self:
+        """Load existing error log from disk."""
+        self = super().__new__(cls)
+        self.__init__(path)
+        cls._instance = self
+
+        console = self._print.unwrap().bind(path=str(self.path))
 
         if not self.path.exists():
-            self._errors = []
             self._save_errors()
-
-            cons.info('Created new error log path')
-            return
+            self._print.info('Created error log')
+            return self
 
         try:
-            with self.path.open('rb') as f:
-                self._errors = orjson.loads(f.read())
-        except orjson.JSONDecodeError:
-            cons.exception('Failed to load error log')
+            self._errors = orjson.loads(self.path.read_bytes())
 
-            self._errors = []
+        except orjson.JSONDecodeError:
+            console.exception('Failed to load error log')
             self._save_errors()
+
         else:
-            cons.info('Loaded error log', error_count=len(self._errors))
+            if errors := self._errors:
+                self._print.info('Parsed error entries', count=len(errors))
+
+        console.info('Loaded error log')
+        return self
 
     def _save_errors(self) -> None:
         """Save current error log to JSON path."""
-        with self.path.open('wb') as f:
-            f.write(orjson.dumps(self._errors, option=orjson.OPT_INDENT_2))
+        self.path.write_bytes(orjson.dumps(self._errors, option=orjson.OPT_INDENT_2))
 
     def _save_entry(self, **entry: Unpack[ErrorDict]) -> None:
-        self._errors.append(entry)
+        index = len(self._errors)
+        self._errors.insert(index, entry)
+        self._prev_map[self.uid] = index
         self._save_errors()
 
     if TYPE_CHECKING:
@@ -207,11 +234,9 @@ class ErrorTracker:
         entry = err.entry()
 
         if 'context' in entry and 'traceback' not in entry['context']:
-            traceback_str = '\n'.join(traceback.format_tb(err.__traceback__))
-            entry['context']['traceback'] = traceback_str
+            entry['context']['traceback'] = traceback.format_tb(err.__traceback__)
 
-        self._errors.append(entry)
-        self._save_errors()
+        self._save_entry(**entry)
 
         if result and exception:
             raise err from exception
@@ -252,8 +277,8 @@ class ErrorTracker:
             context=context,
         )
 
-        cons = console.bind(uid=self.uid, stage=stage.value)
-        cons.warning(f'Pipeline warning: {message}')
+        console = self._print.unwrap()
+        console.warning(f'Pipeline warning: {message}', uid=self.uid, stage=stage.value)
 
     def get_unidentified_errors(self) -> list[ErrorDict]:
         """Get all errors that are not associated with a specific email.
@@ -295,6 +320,7 @@ class ErrorTracker:
             days: Number of days to retain errors.
 
         """
+        count = len(self._errors)
         cutoff = datetime.now(UTC).timestamp() - (days * 86400)
 
         self._errors = [
@@ -302,7 +328,26 @@ class ErrorTracker:
         ]
         self._save_errors()
 
-        console.bind(cutoff_days=days).info('Cleared old errors')
+        if removed := count - len(self._errors):
+            self._print.info('Cleared old errors', removed=f'{removed} entries', max_age=f'{days} days')
 
 
-get_error_tracker = make_factory(ErrorTracker)
+if TYPE_CHECKING:
+
+    @contextmanager
+    def error_tracking(uid: str, *, path: Path | None = None) -> Generator[ErrorTracker]:
+        """Context manager to temporarily track errors for a specific email.
+
+        Args:
+            uid: Identifier for the email record to track.
+            path: Path to the error json log.
+                Only required on the first call when specifying a path that differs from the default.
+
+        Yields:
+            Self: The ErrorTracker instance with updated uid.
+
+        """
+        ...
+
+
+error_tracking = ErrorTracker.track

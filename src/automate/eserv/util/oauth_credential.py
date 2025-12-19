@@ -6,7 +6,6 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, NewType, Self, TypeGuard, overload
 
 from azure.core.credentials import AccessToken
-from rampy import make_factory
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -205,6 +204,3 @@ class OAuthCredential[T: TokenManager = TokenManager[Any]](BaseCredential):
     def get_token(self) -> AccessToken: ...
     def get_token(self) -> AccessToken:
         return AccessToken(str(self), int(self))
-
-
-make_oauth_credential = make_factory(OAuthCredential)

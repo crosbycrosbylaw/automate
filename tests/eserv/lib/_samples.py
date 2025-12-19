@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-__all__ = ['SAMPLE_EMAIL', 'create_sample_email']
+__all__ = ['SAMPLE_EMAIL', 'create_sample_email', 'sample_path']
 
 import typing
+from pathlib import Path
 from typing import Any, TypedDict
 
 if typing.TYPE_CHECKING:
@@ -218,3 +219,7 @@ def create_sample_email[T: TemplateFormatMapping | Mapping[str, str] = TemplateF
 
 
 SAMPLE_EMAIL = create_sample_email()
+
+
+def sample_path(mock: bool = False):
+    return Path(__file__).parent.joinpath(f'{"sample" if not mock else "mock"}.html').resolve(strict=True)

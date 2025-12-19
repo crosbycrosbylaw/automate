@@ -16,8 +16,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import TYPE_CHECKING
 
-from rampy import make_factory
-
 from setup_console import console
 
 if TYPE_CHECKING:
@@ -147,6 +145,3 @@ Error: {error}
                 body += f'  {key}: {value}\n'
 
         self._send_email(subject, body)
-
-
-get_notifier = make_factory(Notifier)

@@ -3,21 +3,57 @@ from __future__ import annotations
 
 import contextvars
 from datetime import UTC, datetime
+from types import FunctionType
 from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
 from rampy.util import make_factory
 
-from automate.eserv import *
+from automate.eserv import (
+    ErrorTracker,
+    StateTracker,
+    configure,
+    download_documents,
+    extract_upload_info,
+    get_record_processor,
+    process_pipeline_result,
+    stage,
+    status,
+    upload_documents,
+)
 from automate.eserv.types import *
 from setup_console import console
 
 if TYPE_CHECKING:
     from os import PathLike
+    from pathlib import Path
 
     from automate.eserv.types import BatchResult, EmailRecord, ProcessedResult
 
+from rampy import mode
+
 tracker = contextvars.ContextVar[ErrorTracker]('tracker')
+
+
+def _confirm[T: FunctionType](func: T, **info: str) -> T:
+    if not bool(mode.DEBUG):
+        return func
+
+    info['request'] = func.__name__.replace('_', ' ').strip()
+    console.info(event := 'Request confirmation', **info)
+
+    if not input('proceed? Y/n: ').lower().startswith('n'):
+        info['status'] = 'confirmed'
+        console.info(event, **info)
+    else:
+        info['status'] = 'rejected'
+        console.warning(event, **info)
+
+        import sys
+
+        sys.exit()
+
+    return func
 
 
 def _parse(record: EmailRecord) -> BeautifulSoup | IntermediaryResult:
@@ -41,7 +77,7 @@ def _parse(record: EmailRecord) -> BeautifulSoup | IntermediaryResult:
 def _download(soup: BeautifulSoup) -> IntermediaryResult | DownloadInfo:
 
     try:
-        download_info = download_documents(soup)
+        download_info = _confirm(download_documents)(soup)
     except PipelineError as e:
         return tracker.get().error(exception=e)
     except Exception as e:
@@ -79,18 +115,24 @@ def _extract(soup: BeautifulSoup, download_info: DownloadInfo) -> UploadInfo | I
 
 
 def _upload(config: Config, context: dict[str, Any]) -> IntermediaryResult:
+    log = console.bind(event='Upload documents')
 
-    result = upload_documents(
-        documents=[*context['store_path'].glob('*.pdf')],
+    documents: list[Path] = [*context['store_path'].glob('*.pdf')]
+    log.info(documents=[f.name for f in documents])
+
+    result = _confirm(upload_documents)(
+        documents=documents,
         case_name=context['case_name'],
         lead_name=context['lead_name'],
         config=config,
     )
 
+    log = log.bind(status=result.status.value)
+    log.info(uploaded_count=len(result.uploaded_files))
+
     match result.status:
         case status.SUCCESS:
-            console.info(
-                event='Upload successful',
+            log.info(
                 folder=result.folder_path,
                 files=len(result.uploaded_files),
             )
@@ -120,13 +162,13 @@ def _upload(config: Config, context: dict[str, Any]) -> IntermediaryResult:
 class Pipeline:
     """Unified document processing pipeline."""
 
-    stage: stage = stage.INITIALIZATION
+    stage: stage = PipelineStage.INITIALIZATION
 
     def __init__(self, dotenv_path: PathLike[str] | None = None) -> None:
         """Initialize pipeline with configuration."""
         self.config = configure(dotenv_path=dotenv_path)
-        self.state = get_state_tracker(self.config.paths.state)
-        self.tracker = get_error_tracker(self.config.paths.errors)
+        self.state = StateTracker(self.config.paths.state)
+        self.tracker = ErrorTracker(self.config.paths.errors)
 
     def process(self, record: EmailRecord) -> IntermediaryResult:
         """Process HTML file through complete pipeline.

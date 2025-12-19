@@ -7,9 +7,13 @@ __all__ = ['component']
 
 from datetime import datetime
 from pathlib import Path
+from pydoc import importfile
 from typing import TYPE_CHECKING, Final
 
+from rampy.util.mode import get_debug
+
 from automate.eserv.core import eserv_pipeline
+from automate.eserv.types.structs import EmailRecord
 from automate.eserv.util.email_record import make_email_record
 
 if TYPE_CHECKING:
@@ -21,19 +25,24 @@ def eserv(path: str | None):
     return eserv_pipeline(None if not path else Path(path))
 
 
+DEBUG = get_debug()
+
+
 def process(
-    body,
-    dotenv: str = None,
+    item,
+    env: str = None,
     uid: str = None,
     received: str = None,
     subject: str = '',
     sender: str = 'unknown',
+    file: bool = False,
+    debug: bool = False,
 ):
     """Execute pipeline for a single email record.
 
     Args:
-        body (str):
-            The body of an email record to process.
+        item (str | PathLike[str]):
+            The body of an email record to process (or a path if `file=True`).
 
     Kwargs:
         dotenv (str | None):
@@ -46,22 +55,45 @@ def process(
             The subject line of the email.
         sender (str):
             The sender's email address or name.
+        file: (bool):
+            Whether to treat the argument as a path instead of HTML content.
+            The file must contain either
+            - HTML content of an email body
+            - Python file containing a main function that returns an email record.
 
     Returns:
         ProcessedResult with processing status and error information if applicable.
 
     """
+    DEBUG.set(state=debug)
+
+    app = eserv(env)
+
     kwds: dict[str, Any] = {
         'uid': uid,
         'subject': subject,
         'sender': sender,
         'received_at': None,
+        'body': item,
     }
 
     if received:
         kwds['received_at'] = datetime.fromisoformat(received)
 
-    eserv(dotenv).execute(make_email_record(body, **kwds))
+    if file is not False:
+        path = Path(item).resolve(strict=True)
+
+        if 'html' in path.suffix:
+            kwds['body'] = path.read_text()
+
+        if 'py' in path.suffix:
+            record = importfile(str(path)).main()
+            if not isinstance(record, EmailRecord):
+                raise TypeError(type(record))
+            app.execute(record)
+            return
+
+    app.execute(make_email_record(*kwds))
 
 
 def monitor(dotenv: str = None, lookback: int = 1):

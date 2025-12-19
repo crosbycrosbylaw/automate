@@ -3,12 +3,12 @@ from __future__ import annotations
 __all__ = ['Config']
 
 from dataclasses import InitVar, dataclass, field, fields
-from typing import TYPE_CHECKING, no_type_check
+from typing import TYPE_CHECKING, Self, no_type_check
 
 from rampy import make_factory
 
 from automate.eserv.config.utils import email_variable, env_var, integer_variable
-from setup_console import console
+from setup_console import mode, mode_console
 
 from ._credentials import CredentialsConfig
 from ._paths import PathsConfig
@@ -71,26 +71,27 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
     paths: PathsConfig = field(init=False)
     creds: CredentialsConfig = field(init=False)
 
-    def __new__(cls, dotenv_path: StrPath | None = None) -> Config:
-        from .utils import ensure_fields
+    _verbose: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
 
-        paths = PathsConfig(dotenv=dotenv_path)
-        creds = CredentialsConfig(path=paths.credentials)
+    @classmethod
+    def _setup(cls, dotenv_path: StrPath | None = None) -> Self:
+        self = super().__new__(cls)
+        object.__setattr__(self, 'paths', paths := PathsConfig(dotenv=dotenv_path))
+        object.__setattr__(self, 'creds', CredentialsConfig(path=paths.credentials))
+        super().__init__(self)
 
-        this = super().__new__(cls)
-        object.__setattr__(this, 'paths', paths)
-        object.__setattr__(this, 'creds', creds)
-        super().__init__(this)
-        return ensure_fields(this)
+        return self
 
-    def __post_init__(self, dotenv_path: StrPath | None) -> None:
-        console.info(
-            event='Loaded configuration',
-            dotenv_path=dotenv_path,
-            service_dir=self.paths.service.as_posix(),
-            cache_ttl=self.index_max_age,
-            smtp_server=self.smtp_server,
-        )
+    def __new__(cls, dotenv_path: StrPath | None) -> Self:
+        return getattr(cls, '_instance', cls._setup(dotenv_path))
+
+    def __post_init__(self, dotenv_path: ...) -> None:
+        self._verbose.info('SMTP configuration', **self.smtp())
+        self._verbose.info('Monitoring configuration', **self.monitoring())
+        self._verbose.info('Base configuration', **self.base())
+
+        console = self._verbose.unwrap()
+        console.info('Loaded configuration', **{} if not dotenv_path else {'dotenv_path': dotenv_path})
 
     @no_type_check
     def smtp(self) -> SMTPConfig:
@@ -110,7 +111,11 @@ class Config(MonitoringFields, SMTPFields, BaseFields):
 
     @no_type_check
     def base(self) -> BaseConfig:
-        return {f.name: getattr(self, f.name) for f in fields(self) if f.name}
+        return {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if not any(f.name.startswith(x) for x in ('_', 'certificate', 'monitoring', 'smtp'))
+        }
 
 
 configure = make_factory(Config)

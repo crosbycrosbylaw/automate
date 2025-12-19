@@ -9,7 +9,8 @@ class AuthError(Exception):
     code: str
     desc: str
 
-    def __init__(self, data: dict[str, str], *args: object) -> None:
+    def __init__(self, data: dict[str, str] | None = None, *args: object) -> None:
+        data = data or {}
         self.code = data.get('error', 'unknown')
         self.desc = data.get('error_description', 'no information')
         super().__init__(*args)

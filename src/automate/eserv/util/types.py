@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from .dbx_manager import DropboxManager
 from .email_state import StateTracker
-from .error_tracking import ErrorTracker
+from .error_tracker import ErrorTracker
 from .index_cache import IndexCache
 from .msal_manager import MSALManager
 from .notifications import Notifier

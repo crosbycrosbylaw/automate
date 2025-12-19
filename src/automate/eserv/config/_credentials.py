@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast, no_type_check, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, TypeGuard, no_type_check, overload
 
 import orjson
 
 from automate.eserv.util.oauth_credential import OAuthCredential
+from setup_console import mode, mode_console
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Generator
     from pathlib import Path
     from threading import Lock
 
     from automate.eserv.types import *
+    from setup_console import *
 
 
 def _nest_properties(data: CredentialsJSON | dict[str, Any]) -> dict[str, Any]:
@@ -52,56 +55,76 @@ def _credential_map_factory() -> CredentialMap:
     return {}
 
 
-@dataclass(slots=True, frozen=True)
+def _path_factory():
+    from automate.eserv.config import get_paths
+
+    return get_paths().credentials
+
+
+@dataclass(frozen=True, slots=True)
 class CredentialsConfig:
     """Manages OAuth credentials for Dropbox and Outlook."""
 
     _instance: ClassVar[Self]
 
-    path: Path = field(doc='path to the credentials JSON file')
+    path: Path = field(doc='path to the credentials JSON file', default_factory=_path_factory)
+
+    _verbose: ModeConsole = field(init=False, default_factory=mode_console(mode.VERBOSE))
 
     @property
     def msal(self) -> MSALCredential:
         """Retrieve an MSAL credential, refreshing and caching the value as needed."""
-        with self._lock:
-            cred: MSALCredential = self._mapping['msal']
+        with self._map() as mapping:
+            cred = mapping['msal']
             return cred if not cred.expired else self._refresh(cred)
 
     @property
     def dropbox(self) -> DropboxCredential:
         """Retrieve a Dropbox credential, refreshing and caching the value as needed."""
-        with self._lock:
-            cred: DropboxCredential = self._mapping['dropbox']
+        with self._map() as mapping:
+            cred = mapping['dropbox']
             return cred if not cred.expired else self._refresh(cred)
 
     _lock: Lock = field(init=False, repr=False, default_factory=threading.Lock)
     _mapping: CredentialMap = field(init=False, repr=False, default_factory=_credential_map_factory)
 
     def __new__(cls, path: Path) -> Self:
-        if not hasattr(cls, '_instance'):
-            resolved_path = path.resolve(strict=True)
-            this = super().__new__(cls)
-            object.__setattr__(this, 'path', resolved_path)
-            object.__setattr__(this, '_lock', threading.Lock())
-            object.__setattr__(this, '_mapping', {})
-            this.__init__(resolved_path)
+        self = getattr(cls, '_instance', cls._setup(path))
 
-            cls._instance = this
+        if path != self.path:
+            object.__setattr__(self, 'path', path)
+            self._reload()
 
-        return cls._instance
+        return self
 
-    def __post_init__(self) -> None:
+    @classmethod
+    def _setup(cls, path: Path) -> Self:
+        path = path.resolve(strict=True)
+
+        self = super().__new__(cls)
+        self.__init__(path)
+
+        cls._instance = self
+
+        console = self._verbose.unwrap().bind(**dict.fromkeys(self._mapping, True))
+        self._reload()
+
+        console.info(event='Loaded credentials')
+        return self
+
+    def _reload(self) -> None:
         with self.path.open('rb') as f:
             data = orjson.loads(f.read())
 
         for json in data:
+            self._verbose.info(event=f'Processing {json["type"]} credential', **json)
             cred = parse_credential_json(json)
             self._mapping[cred.type] = cred
 
     def __setitem__(self, name: CredentialType, value: OAuthCredential[Any]) -> None:
         """Update or add a cached OAuth2 credential."""
-        with self._lock:
-            self._mapping[name] = value
+        with self._map() as mapping:
+            mapping[name] = value
 
     @overload
     def __getitem__(self, name: Literal['msal']) -> MSALCredential: ...
@@ -109,8 +132,8 @@ class CredentialsConfig:
     def __getitem__(self, name: Literal['dropbox']) -> DropboxCredential: ...
     def __getitem__(self, name: ...) -> ...:
         """Retrieve the named OAuth2 credential directly from the cache."""
-        with self._lock:
-            return self._mapping[name]
+        with self._map() as mapping:
+            return mapping[name]
 
     def _refresh[T: OAuthCredential[Any]](self, cred: T) -> T:
         """Refresh an OAuth2 token.
@@ -120,24 +143,32 @@ class CredentialsConfig:
                 If the type of the credential does not match any of those configured.
 
         """
-        refreshed = cred.refresh()
-        with self._lock:
-            self._mapping[cred.type] = refreshed
-            self.persist()
-        return refreshed
+        new = cred.refresh()
+        self.persist(**{new.type: new})
+        return new
 
-    @no_type_check
-    def persist(self, **mapping: OAuthCredential[Any]) -> None:
+    def persist(
+        self,
+        **updates: OAuthCredential[Any],
+    ) -> None:
         """Write updated credentials back to disk."""
-        with self._lock:
-            self._mapping.update(mapping or {})
+        with self._map() as mapping:
+            if self._guard(updates):
+                mapping.update(updates)
 
-        data = [cred.export() for cred in cast('Iterable[OAuthCredential]', self._mapping.values())]
-        with self.path.open('wb') as f:
-            f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+            data = orjson.dumps([mapping[key].export() for key in mapping], option=orjson.OPT_INDENT_2)
+
+        self.path.write_bytes(data)
+
+    def _guard(self, mapping: ...) -> TypeGuard[PartialCredentialMap]:
+        gen = (key in {'msal', 'dropbox'} and isinstance(mapping[key], OAuthCredential) for key in mapping)
+        return all([isinstance(mapping, dict), *gen])
+
+    @contextmanager
+    def _map(self) -> Generator[CredentialMap]:
+        with self._lock:
+            yield self._mapping
 
 
 def get_credentials() -> CredentialsConfig:
-    from ._paths import get_paths
-
-    return CredentialsConfig(path=get_paths().credentials)
+    return CredentialsConfig()

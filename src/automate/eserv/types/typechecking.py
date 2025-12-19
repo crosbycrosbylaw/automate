@@ -10,6 +10,7 @@ if typing.TYPE_CHECKING:
         'CredentialsJSON',
         'ErrorDict',
         'MonitoringConfig',
+        'PartialCredentialMap',
         'ProcessStatus',
         'ProcessedResultDict',
         'SMTPConfig',
@@ -90,5 +91,10 @@ if typing.TYPE_CHECKING:
 
     @type_check_only
     class CredentialMap(TypedDict):
-        msal: MSALCredential
-        dropbox: DropboxCredential
+        msal: Required[MSALCredential]
+        dropbox: Required[DropboxCredential]
+
+    @type_check_only
+    class PartialCredentialMap(TypedDict):
+        msal: NotRequired[MSALCredential]
+        dropbox: NotRequired[DropboxCredential]

@@ -20,57 +20,14 @@ import pytest
 from azure.core.credentials import AccessToken
 from pytest_fixture_classes import fixture_class
 
-from automate.eserv.errors.authentication import AuthError
 from automate.eserv.util.dbx_manager import DropboxManager
 from automate.eserv.util.msal_manager import MSALManager
-from tests.eserv.conftest import MockDependencies
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Sequence
 
     from automate.eserv.types import DropboxCredential, MSALCredential
-
-
-# ==============================================================================
-# Fixtures
-# ==============================================================================
-
-
-@pytest.fixture
-def dropbox_credential(mock_deps: MockDependencies) -> DropboxCredential:
-    """Create Dropbox credential from mock dependencies."""
-    from automate.eserv.config import parse_credential_json
-
-    # Parse credential directly from JSON data
-    dbx_json = mock_deps.credentials[0].copy()
-    # Set fresh expiration time to ensure credential is not expired
-    future_time = datetime.now(UTC) + timedelta(hours=4)
-    dbx_json['expires_at'] = future_time.isoformat()
-    return parse_credential_json(dbx_json)
-
-
-@pytest.fixture
-def msal_credential(mock_deps: MockDependencies) -> MSALCredential:
-    """Create MSAL credential from mock dependencies."""
-    from automate.eserv.config import parse_credential_json
-
-    # Parse credential directly from JSON data
-    msal_json = mock_deps.credentials[1].copy()
-    # Set fresh expiration time to ensure credential is not expired
-    future_time = datetime.now(UTC) + timedelta(hours=4)
-    msal_json['expires_at'] = future_time.isoformat()
-    cred = parse_credential_json(msal_json)
-    # Ensure authority property is set for MSALManager
-    cred.properties.setdefault('authority', 'https://login.microsoftonline.com/common')
-    return cred
-
-
-@pytest.fixture
-def expired_credential(dropbox_credential: DropboxCredential) -> DropboxCredential:
-    """Create expired credential for testing."""
-    expired_time = datetime.now(UTC) - timedelta(hours=1)
-    dropbox_credential.properties['expires_at'] = expired_time.isoformat()
-    return dropbox_credential
+    from tests.eserv.conftest import MockDependencies
 
 
 # ==============================================================================
@@ -138,6 +95,7 @@ class MockMSAL:
     """Mock fixture for MSAL/Microsoft Graph API interactions."""
 
     mock_deps: MockDependencies
+    monkeypatch: pytest.MonkeyPatch
 
     _cred: MSALCredential = field(init=False)
     _app: Mock = field(init=False)
@@ -153,7 +111,11 @@ class MockMSAL:
     def __post_init__(self) -> None:
         cred = self.mock_deps.creds.msal
         cred.properties.setdefault('authority', 'https://login.microsoftonline.com/common')
+
         object.__setattr__(self, '_cred', cred)
+
+    def default(self) -> dict[str, Any]:
+        return {'access_token': ''}
 
     @contextmanager
     def __call__(
@@ -180,8 +142,55 @@ class MockMSAL:
         object.__setattr__(self, '_app', app)
         patches['ConfidentialClientApplication'] = Mock(return_value=app)
 
+        self.monkeypatch.setattr(self._cred.manager, 'client', app)
+
         with patch.multiple('automate.eserv.util.msal_manager', **patches):
             yield self
+
+
+# ==============================================================================
+# Credential Fixtures
+# ==============================================================================
+
+
+@pytest.fixture
+def dropbox_credential(mock_deps: MockDependencies, monkeypatch: pytest.MonkeyPatch) -> DropboxCredential:
+    """Create Dropbox credential from mock dependencies."""
+    from automate.eserv.config import parse_credential_json
+
+    # Parse credential directly from JSON data
+    dbx_json = mock_deps.credentials[0].copy()
+    # Set fresh expiration time to ensure credential is not expired
+    future_time = datetime.now(UTC) + timedelta(hours=4)
+    dbx_json['expires_at'] = future_time.isoformat()
+    return parse_credential_json(dbx_json)
+
+
+@pytest.fixture
+def msal_credential(
+    mock_deps: MockDependencies,
+    monkeypatch: pytest.MonkeyPatch,
+) -> MSALCredential:
+    """Create MSAL credential from mock dependencies."""
+    from automate.eserv.config import parse_credential_json
+
+    # Parse credential directly from JSON data
+    msal_json = mock_deps.credentials[1].copy()
+    # Set fresh expiration time to ensure credential is not expired
+    future_time = datetime.now(UTC) + timedelta(hours=4)
+    msal_json['expires_at'] = future_time.isoformat()
+    cred: MSALCredential = parse_credential_json(msal_json)
+    # Ensure authority property is set for MSALManager
+    cred.properties.setdefault('authority', 'https://login.microsoftonline.com/common')
+    return cred
+
+
+@pytest.fixture
+def expired_credential(dropbox_credential: DropboxCredential) -> DropboxCredential:
+    """Create expired credential for testing."""
+    expired_time = datetime.now(UTC) - timedelta(hours=1)
+    dropbox_credential.properties['expires_at'] = expired_time.isoformat()
+    return dropbox_credential
 
 
 # ==============================================================================
@@ -545,8 +554,13 @@ class TestMSALManagerInitialization:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
-            patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app) as MockMSAL,
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
+            patch(
+                'automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app
+            ) as MockMSAL,
         ):
             # Access manager and reset its _client INSIDE patch
             manager = msal_credential.manager
@@ -602,6 +616,21 @@ class TestMSALManagerInitialization:
 class TestMSALManagerTokenRefresh:
     """Test MSALManager token refresh with multi-tier fallback."""
 
+    @staticmethod
+    def _check_exc_group(
+        exc: object,
+        message: str = r'MSAL token refresh failed',
+        count: int = 3,
+        match_strs: Sequence[str] = (),
+    ) -> bool:
+        string = '\n'.join(str(e) for e in getattr(exc, 'exceptions', ()))
+        checks = isinstance(exc, ExceptionGroup) and [
+            exc.message == message,
+            len(exc.exceptions) == count,
+            all(s in string for s in match_strs),
+        ]
+        return bool(checks and all(checks))
+
     def test_refresh_uses_silent_acquisition_first(
         self,
         msal_credential: MSALCredential,
@@ -622,7 +651,10 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context
@@ -656,7 +688,10 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context
@@ -691,7 +726,10 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context
@@ -722,13 +760,16 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context
             manager = msal_credential.manager
             manager._client = None
-            with pytest.raises(TypeError, match='Expected dict'):
+            with pytest.raises(check=self._check_exc_group):
                 msal_credential.refresh()
 
     def test_refresh_raises_on_error_response(
@@ -752,15 +793,15 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
-            # Access manager and reset its _client INSIDE the patch context
             manager = msal_credential.manager
             manager._client = None
-            # When all methods return errors, _parse_auth_response logs them and returns None
-            # This causes _validate_token_data to raise TypeError
-            with pytest.raises(TypeError, match='Expected dict'):
+            with pytest.raises(ExceptionGroup, check=self._check_exc_group):
                 msal_credential.refresh()
 
     def test_refresh_normalizes_expires_in_to_expires_at(
@@ -783,7 +824,10 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context
@@ -817,7 +861,10 @@ class TestMSALManagerTokenRefresh:
             del msal_credential.__dict__['manager']
 
         with (
-            patch('automate.eserv.util.msal_manager._build_app_cred', return_value=msal_credential.client_secret),
+            patch(
+                'automate.eserv.util.msal_manager._build_app_cred',
+                return_value=msal_credential.client_secret,
+            ),
             patch('automate.eserv.util.msal_manager.ConfidentialClientApplication', return_value=mock_app),
         ):
             # Access manager and reset its _client INSIDE the patch context

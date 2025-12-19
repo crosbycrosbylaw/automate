@@ -1,1 +1,36 @@
-[]
+[
+    {
+        "uid": "123",
+        "category": "parsing",
+        "message": "could not find download link in email content.",
+        "timestamp": "2025-12-18T20:13:49.764097+00:00"
+    },
+    {
+        "uid": "123",
+        "category": "parsing",
+        "message": "could not find download link in email content.",
+        "timestamp": "2025-12-18T20:19:37.796493+00:00"
+    },
+    {
+        "uid": "123",
+        "category": "parsing",
+        "message": "HTML content is missing a required ASP.NET field.",
+        "timestamp": "2025-12-18T20:22:53.976882+00:00",
+        "context": {
+            "missing_field": "__EVENTVALIDATION",
+            "args": [],
+            "traceback": "  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\core.py\", line 44, in _download\n    download_info = download_documents(soup)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 160, in download_documents\n    docs = _process_response(session, response)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 106, in _process_response\n    post_response = _bypass_aspnet_form(session, base_text, base_link)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 58, in _bypass_aspnet_form\n    request_data = extract_aspnet_form_data(base_text, email)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\extract.py\", line 365, in extract_aspnet_form_data\n    raise EmailParseError(message, context={'missing_field': key})\n"
+        }
+    },
+    {
+        "uid": "123",
+        "category": "parsing",
+        "message": "HTML content is missing a required ASP.NET field.",
+        "timestamp": "2025-12-18T20:41:04.070683+00:00",
+        "context": {
+            "missing_field": "__EVENTVALIDATION",
+            "args": [],
+            "traceback": "  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\core.py\", line 62, in _download\n    download_info = _confirm(download_documents)(soup)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 160, in download_documents\n    docs = _process_response(session, response)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 106, in _process_response\n    post_response = _bypass_aspnet_form(session, base_text, base_link)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\download.py\", line 58, in _bypass_aspnet_form\n    request_data = extract_aspnet_form_data(base_text, email)\n\n  File \"D:\\projects\\ccdev-auto\\src\\automate\\eserv\\extract.py\", line 365, in extract_aspnet_form_data\n    raise EmailParseError(message, context={'missing_field': key})\n"
+        }
+    }
+]

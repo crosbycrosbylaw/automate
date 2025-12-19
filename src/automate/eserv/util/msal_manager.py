@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, NoReturn
 
 from azure.core.credentials import TokenCredential
 from msal import ConfidentialClientApplication
@@ -61,6 +61,23 @@ def _build_app_cred() -> dict[str, str]:
         raise MissingVariableError('CERT_THUMBPRINT')
 
     return {'thumbprint': thumbprint, 'private_key': f'{config.paths.private_key!s}'}
+
+
+def _raise_auth_error_group(
+    message: str = 'MSAL token refresh failed',
+    *,
+    funcs: Sequence[Callable[..., Any]],
+    errors: Sequence[Exception | None],
+) -> NoReturn:
+    group: list[Exception] = []
+
+    items = ((funcs[i].__qualname__, e) for i, e in enumerate(errors) if e)
+    for name, exc in items:
+        exc.add_note(name)
+        group.append(exc.with_traceback(None))
+
+    console.error(message)
+    raise ExceptionGroup(message, group)
 
 
 @dataclass(slots=True)
@@ -147,13 +164,13 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
             RuntimeError: If token refresh fails
 
         """
-        funcs = [
+        funcs: list[Callable[[], dict[str, Any] | None]] = [
             self._acquire_token_silent,
             self._acquire_token_by_refresh_token,
             self._acquire_token_for_client,
         ]
 
-        errors: list[Exception | None] = [None for _ in range(3)]
+        errors: list[Exception | None] = [None for _ in range(len(funcs))]
 
         for i, f in enumerate(funcs):
             name = f.__name__.strip('_')
@@ -166,14 +183,9 @@ class MSALManager(TokenManager[ConfidentialClientApplication], TokenCredential):
             else:
                 return data
 
-            console.warning('Authentication failed', method=name)
+            console.warning('Authentication failed', method=name, error=str(errors[i]))
 
-        console.error(
-            event='MSAL token refresh failed',
-            **{f.__name__.strip('_'): str(e) for f, e in zip(funcs, errors, strict=True) if e},
-        )
-
-        raise sys.exit(1)
+        _raise_auth_error_group(funcs=funcs, errors=errors)
 
 
 make_msal_manager = make_factory(MSALManager)

@@ -24,10 +24,10 @@ from typing import TYPE_CHECKING
 
 from dropbox.exceptions import ApiError
 
+import setup_console
 from automate.eserv._module import stage, status
 from automate.eserv.types.results import IntermediaryResult
-from automate.eserv.util import get_dbx_folder_matcher, get_dbx_index_cache, get_notifier
-from setup_console import console
+from automate.eserv.util import FolderMatcher, IndexCache, Notifier
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -57,12 +57,14 @@ def upload_documents(
         Upload result with status and details.
 
     """
+    console = setup_console.console.bind(event='Upload documents', case_name=case_name, lead_name=lead_name)
+
     if not documents:
-        console.warning('There are no documents to upload.')
+        console.warning(cause='There are no documents to upload.')
         return IntermediaryResult(status=status.NO_WORK)
 
     dbx = config.creds.dropbox.manager
-    cache = get_dbx_index_cache(config.cache.index_file, ttl_hours=4)
+    cache = IndexCache(config.cache.index_file, ttl_hours=4)
 
     if cache.is_stale():
         try:
@@ -71,11 +73,11 @@ def upload_documents(
         except ApiError as e:
             return IntermediaryResult(status.ERROR, error=f'Failed to refresh Dropbox index: {e!s}')
 
-    notifier = get_notifier(config.smtp())
+    notifier = Notifier(config.smtp())
 
     if (
         match := case_name.capitalize() != 'Unknown'
-        and (matcher := get_dbx_folder_matcher(cache.get_all_paths(), min_score))
+        and (matcher := FolderMatcher(cache.get_all_paths(), min_score))
         and matcher.find_best_match(case_name)
     ):
         target = match.folder_path
@@ -91,16 +93,13 @@ def upload_documents(
     )
 
     try:
-        store_path = None
-
+        name = lead_name.removesuffix('.pdf')
+        count = len(documents) - 1
         for i, path in enumerate(documents):
             suffix = '.pdf' if not len(documents) <= 1 else f'_{i + 1}.pdf'
-            filename = f'{lead_name.removesuffix(".pdf")}{suffix}'
+            dbx.upload(path, dest := f'{target}/{name}{suffix}')
 
-            dbx.upload(path, f'{target}/{filename}')
-
-            if store_path is None:
-                store_path = path.parent
+            console.info(destination=dest, complete=i, remaining=count - i)
 
         if state == status.SUCCESS:
             notifier.notify_upload_success(case_name, target, len(dbx.uploaded))

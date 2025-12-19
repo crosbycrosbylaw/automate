@@ -86,10 +86,10 @@ class TestPipelineInit:
         with mock_deps():
             pipeline = Pipeline(dotenv_path=mock_deps.fs['.env.test'])
 
-        mock_deps.get_state_tracker.assert_called_once_with(mock_deps.fs['service']['state.json'])
+        mock_deps.StateTracker.assert_called_once_with(mock_deps.fs['service']['state.json'])
 
         assert pipeline.state.path == mock_deps.configure.get('paths.state')
-        assert pipeline.state is mock_deps.get_state_tracker.return_value
+        assert pipeline.state is mock_deps.StateTracker.return_value
 
     def test_error_tracker_initialization(
         self,
@@ -100,8 +100,8 @@ class TestPipelineInit:
         mock_errors_json = mock_deps.fs['service']['errors.json']
         pipeline = Pipeline()
 
-        mock_core['get_error_tracker'].assert_called_once_with(mock_errors_json)
-        assert pipeline.tracker is mock_deps.get_error_tracker.return_value
+        mock_core['ErrorTracker'].assert_called_once_with(mock_errors_json)
+        assert pipeline.tracker is mock_deps.ErrorTracker.return_value
         assert pipeline.tracker.path == mock_errors_json
 
 
@@ -275,7 +275,7 @@ class TestPipelineProcess:
         store_path.mkdir(exist_ok=True)
 
         # Mock state to return True for is_processed
-        mock_deps.get_state_tracker.return_value.is_processed.return_value = True
+        mock_deps.StateTracker.return_value.is_processed.return_value = True
 
         # Create email record with specific UID (EmailRecord is frozen)
         test_record = replace(sample_email_record, uid='test-uid')
@@ -297,7 +297,7 @@ class TestPipelineProcess:
             # Verify NO_WORK returned
             assert result.status == status.NO_WORK
 
-            mock_deps.get_state_tracker.return_value.is_processed.assert_called_once_with('test-uid')
+            mock_deps.StateTracker.return_value.is_processed.assert_called_once_with('test-uid')
 
     def test_no_pdfs_after_download(
         self,
@@ -482,7 +482,7 @@ class TestPipelineMonitor:
             await Pipeline().monitor()
 
             # Verify error cleanup called
-            mock_deps.get_error_tracker.return_value.clear_old_errors.assert_called_once_with(days=30)
+            mock_deps.ErrorTracker.return_value.clear_old_errors.assert_called_once_with(days=30)
 
 
 class TestPipelineExecute:
@@ -553,7 +553,7 @@ class TestPipelineExecute:
             # When BeautifulSoup fails, _parse() logs it via tracker.error()
             # Then execute() retrieves it via tracker.prev_error
             # Mock prev_error to return the error that was logged
-            mock_tracker = mock_deps.get_error_tracker.return_value
+            mock_tracker = mock_deps.ErrorTracker.return_value
             mock_tracker.prev_error = {
                 'uid': sample_email_record.uid,
                 'category': stage.EMAIL_PARSING.value,

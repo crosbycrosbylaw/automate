@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Unpack
 from rampy import test
 
 from automate.eserv import stage
-from automate.eserv.util import get_error_tracker
 from automate.eserv.util.email_record import make_email_record
+from automate.eserv.util.error_tracker import ErrorTracker, error_tracking
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,22 +80,22 @@ class TestErrorTracker:
         test_retrieval: bool,
         directory: Path,
     ):
-        log_file = directory / 'errors.json'
+        ErrorTracker.set(path=(log_file := directory / 'errors.json'))
 
         if test_persistence:
             # Test persistence across instances
-            tracker1 = get_error_tracker(log_file, record.uid)
-            tracker1.error(error_message, stage=stage)
+            with error_tracking(record.uid) as tracker1:
+                tracker1.error(error_message, stage=stage)
 
-            errors = get_error_tracker(log_file).get_errors_for_email(record.uid)
+            errors = ErrorTracker(log_file).get_errors_for_email(record.uid)
 
             assert len(errors) == 1
             assert errors[0]['message'] == error_message
 
-            with get_error_tracker(log_file).track(record.uid) as tracker3:
+            with ErrorTracker(log_file).track(record.uid) as tracker3:
                 tracker3.error(error_message, stage=stage)
 
-            errors = get_error_tracker(log_file).get_errors_for_email(record.uid)
+            errors = ErrorTracker(log_file).get_errors_for_email(record.uid)
 
             assert len(errors) > 1
             assert errors[1]['message'] == error_message
@@ -104,7 +104,7 @@ class TestErrorTracker:
             expected_count = 2
 
             # Test error retrieval by email and stage
-            with get_error_tracker(log_file).track(record.uid) as tracker:
+            with ErrorTracker(log_file).track(record.uid) as tracker:
                 tracker.error(error_message, stage=stage)
                 tracker.error('parse error', stage=stage.EMAIL_PARSING)
 
@@ -118,8 +118,8 @@ class TestErrorTracker:
 
         else:
             # Test basic logging
-            tracker = get_error_tracker(log_file, record.uid)
-            tracker.error(error_message, stage=stage, context={'test': 'value'})
+            with error_tracking(record.uid) as tracker:
+                tracker.error(error_message, stage=stage, context={'test': 'value'})
 
             errors = tracker.get_errors_for_email(record.uid)
             assert len(errors) == 1

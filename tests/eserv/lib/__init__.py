@@ -1,3 +1,3 @@
-__all__ = ['SAMPLE_EMAIL', 'create_sample_email']
+__all__ = ['SAMPLE_EMAIL', 'create_sample_email', 'sample_path']
 
-from ._samples import SAMPLE_EMAIL, create_sample_email
+from ._samples import *

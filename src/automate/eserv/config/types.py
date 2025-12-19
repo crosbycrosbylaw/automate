@@ -3,6 +3,7 @@ __all__ = [
     'DataclassInstance',
     'DataclassType',
     'EmailAddress',
+    'ModeConsole',
     'PathsConfig',
     'StrPath',
     'ValidationHint',
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from ._credentials import CredentialsConfig
 from ._paths import PathsConfig
-from .utils import EmailAddress, ValidationHint
+from .utils import EmailAddress, ModeConsole, ValidationHint
 
 if TYPE_CHECKING:
     from dataclasses import Field

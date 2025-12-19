@@ -18,7 +18,6 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from rampy.util import make_factory
 from rapidfuzz import fuzz, process
 
 from setup_console import console
@@ -220,6 +219,3 @@ class FolderMatcher:
         )
 
         return None
-
-
-get_dbx_folder_matcher = make_factory(FolderMatcher)

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import enum
 import os
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass, field, fields
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
@@ -11,16 +10,18 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from dotenv import find_dotenv, load_dotenv
 from zmq import Enum
 
-from automate.eserv.config.utils import env_var, hint, path_variable
+from automate.eserv.config.utils import env_var, hint, path_variable, vprinter
 
 if TYPE_CHECKING:
+    from automate.eserv.config.utils import ModeConsole
+
     from .types import *
 
 
 class EnvStatus(Enum):
-    NOT_LOADED = enum.auto()
-    LOAD_SUCCESS = enum.auto()
-    LOAD_ERROR = enum.auto()
+    NOT_LOADED = 'none'
+    LOAD_SUCCESS = 'ok'
+    LOAD_ERROR = 'error'
 
     @classmethod
     def from_path(cls, dotenv_path: StrPath | None) -> tuple[Path, EnvStatus]:
@@ -62,22 +63,11 @@ class PathsConfig:
     """File storage paths."""
 
     _instance: ClassVar[Self]
-    _status: ClassVar[EnvStatus] = EnvStatus.NOT_LOADED
-    _dotenv: ClassVar[Path | None] = None
 
-    @classmethod
-    def _init_env(cls, dotenv_path: StrPath | None = None) -> bool:
-        cls._dotenv, cls._status = EnvStatus.from_path(dotenv_path)
+    dotenv: StrPath | None = field(default=None)
+    env_status: EnvStatus = field(init=False, default=EnvStatus.NOT_LOADED)
 
-        if success := cls._status == EnvStatus.LOAD_SUCCESS:
-            return success
-
-        from setup_console import console
-
-        console.warning(f'Failed to load environment from {cls._dotenv!s}')
-        return success
-
-    dotenv: InitVar[StrPath | None] = None
+    _verbose: ModeConsole = field(init=False, default_factory=vprinter)
 
     root: Path = field(
         init=False,
@@ -103,33 +93,44 @@ class PathsConfig:
     state: Path = field(init=False)
     errors: Path = field(init=False)
 
-    def __new__(cls, dotenv: StrPath | None = None) -> PathsConfig:
-        if not hasattr(cls, '_instance'):
-            cls._init_env(dotenv)
-            this = super().__new__(cls)
-            this.__init__(dotenv)
-            cls._instance = this
-        return cls._instance
+    def __new__(cls, dotenv: StrPath | None = None) -> Self:
+        return getattr(cls, '_instance', cls._setup(dotenv))
 
-    def __post_init__(self, dotenv: StrPath | None) -> None:
-        self._rebase()
-        self._scaffold()
+    @classmethod
+    def _setup(cls, dotenv_path: ...) -> Self:
+        dotenv, status = EnvStatus.from_path(dotenv_path)
+        self = super().__new__(cls)
+        self.__init__(dotenv)
+        self.env_status = status
+        cls._instance = self
 
-    def _rebase(self) -> None:
+        if self.env_status is not EnvStatus.LOAD_SUCCESS:
+            self._verbose.warning('Environment load error', status=self.env_status.value)
+
         for name in 'credentials', 'private_key':
             if (path := getattr(self, name, None)) and not path.is_absolute():
                 setattr(self, name, self.resolve(path, strict=True))
 
-    def _scaffold(self) -> None:
-        svc = self.service
         for name in 'index', 'state', 'errors':
-            path = (svc / f'{name}.json').resolve()
+            path = (self.service / f'{name}.json').resolve()
             path.touch(exist_ok=True)
             setattr(self, name, path)
+
+        self._verbose.info(event='Path configuration', **self.fs())
+        self._verbose.unwrap().info('Loaded paths')
+
+        return self
 
     def resolve(self, *segments: str | Path, strict: bool = False) -> Path:
         return self.root.joinpath(*segments).resolve(strict=strict)
 
+    def fs(self) -> dict[str, str]:
+        return {
+            f.name: str(p.relative_to(self.root))
+            for f in fields(self)
+            if 'Path' in str(f.type) and (p := getattr(self, f.name))
+        }
 
-def get_paths(dotenv: StrPath | None = None) -> PathsConfig:
-    return PathsConfig(dotenv=dotenv)
+
+def get_paths() -> PathsConfig:
+    return PathsConfig()
