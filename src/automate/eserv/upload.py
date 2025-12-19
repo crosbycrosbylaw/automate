@@ -69,17 +69,19 @@ def upload_documents(
     if cache.is_stale():
         try:
             cache.refresh(index := dbx.index())
-            console.info('Dropbox index refreshed', folder_count=len(index))
+            console.info(event='Dropbox index refreshed', folder_count=len(index))
         except ApiError as e:
             return IntermediaryResult(status.ERROR, error=f'Failed to refresh Dropbox index: {e!s}')
 
     notifier = Notifier(config.smtp())
 
-    if (
-        match := case_name.capitalize() != 'Unknown'
-        and (matcher := FolderMatcher(cache.get_all_paths(), min_score))
-        and matcher.find_best_match(case_name)
-    ):
+    if case_name.capitalize() != 'Unknown':
+        matcher = FolderMatcher(cache.get_all_paths(), min_score)
+        match = matcher.find_best_match(case_name)
+    else:
+        match = None
+
+    if match:
         target = match.folder_path
         state = status.SUCCESS
     else:
@@ -96,10 +98,10 @@ def upload_documents(
         name = lead_name.removesuffix('.pdf')
         count = len(documents) - 1
         for i, path in enumerate(documents):
-            suffix = '.pdf' if not len(documents) <= 1 else f'_{i + 1}.pdf'
+            suffix = '.pdf' if len(documents) <= 1 else f'_{i + 1}.pdf'
             dbx.upload(path, dest := f'{target}/{name}{suffix}')
 
-            console.info(destination=dest, complete=i, remaining=count - i)
+            console.info(event='Upload progress', destination=dest, complete=i, remaining=count - i)
 
         if state == status.SUCCESS:
             notifier.notify_upload_success(case_name, target, len(dbx.uploaded))

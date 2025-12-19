@@ -109,7 +109,7 @@ class UploadDocumentSubtestFixture(test.subtestfix):
                     'automate.eserv.upload.Notifier',
                     MagicMock(
                         return_value=self.mock_notifier,
-                        spec=['notify_upload_success', 'notify_manual_review'],
+                        spec=['notify_upload_success', 'notify_manual_review', 'notify_error'],
                     ),
                 ),
             ):
